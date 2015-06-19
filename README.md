@@ -1,2 +1,0 @@
-# AWE
-Ammeon Workflow Engine
