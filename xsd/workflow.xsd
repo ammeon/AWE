@@ -1,0 +1,269 @@
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+     <xs:element name="task">
+         <xs:complexType>
+             <xs:attribute name="cmd" type="xs:string" use="required"/>
+             <xs:attribute name="id" type="xs:string" use="required"/>
+             <xs:attribute name="hosts" use="required">
+                 <xs:simpleType>
+                     <xs:restriction base="xs:string">
+		         <xs:pattern value="\*|[!]?[0-9]+|[!]?[$]"></xs:pattern>
+                     </xs:restriction>
+                 </xs:simpleType>
+             </xs:attribute>
+             <xs:attribute name="server" type="xs:string" use="required"/>
+             <xs:attribute name="optional" type="xs:boolean" use="required"/>
+             <xs:attribute name="continueOnFail" type="xs:boolean" use="required"/>
+             <xs:attribute name="swversion" type="xs:string" use="optional"/>
+             <xs:attribute name="osversion" type="xs:string" use="optional"/>
+             <xs:attribute name="estimatedDur" type="xs:string" use="optional"/>
+             <xs:attribute name="dependency" type="xs:string" use="optional"/>
+             <xs:attribute name="depsinglehost" type="xs:boolean"/>
+             <xs:attribute name="runLocal" type="xs:boolean" use="optional"/>
+             <xs:attribute name="checkparams" type="xs:string" use="optional"/>
+         </xs:complexType>
+     </xs:element>
+     <xs:element name="taskstatus">
+         <xs:complexType>
+             <xs:attribute name="cmd" type="xs:string" use="required"/>
+             <xs:attribute name="id" type="xs:string" use="required"/>
+             <xs:attribute name="host" type="xs:string" use="required"/>
+             <xs:attribute name="server" type="xs:string" use="required"/>
+             <xs:attribute name="optional" type="xs:boolean" use="required"/>
+             <xs:attribute name="continueOnFail" type="xs:boolean" use="required"/>
+             <xs:attribute name="swversion" type="xs:string" use="optional"/>
+             <xs:attribute name="osversion" type="xs:string" use="optional"/>
+             <xs:attribute name="estimatedDur" type="xs:string" use="optional"/>
+             <xs:attribute name="actualDur" type="xs:string" use="optional"/>
+             <xs:attribute name="dependency" type="xs:string" use="optional"/>
+             <xs:attribute name="depsinglehost" type="xs:boolean"/>
+             <xs:attribute name="status" type="xs:string" use="required"/>
+             <xs:attribute name="gid" type="xs:string" use="optional"/>
+             <xs:attribute name="runLocal" type="xs:boolean" use="optional"/>
+             <xs:attribute name="params" type="xs:string" use="optional"/>
+             <xs:attribute name="checkparams" type="xs:string" use="optional"/>
+         </xs:complexType>
+     </xs:element>
+     <xs:element name="start-tag">
+         <xs:complexType>
+             <xs:attribute name="name" type="xs:string" use="required"/>
+         </xs:complexType>
+     </xs:element>
+     <xs:element name="end-tag">
+         <xs:complexType>
+             <xs:attribute name="name" type="xs:string" use="required"/>
+         </xs:complexType>
+     </xs:element>
+     <xs:element name="escape">
+         <xs:complexType>
+             <xs:attribute name="id" type="xs:string" use="required"/>
+             <xs:attribute name="msg" type="xs:string" use="required"/>
+             <xs:attribute name="hosts" type="xs:string" use="required"/>
+             <xs:attribute name="server" type="xs:string" use="required"/>
+             <xs:attribute name="dependency" type="xs:string" use="optional"/>
+             <xs:attribute name="optional" type="xs:boolean"/>
+             <xs:attribute name="depsinglehost" type="xs:boolean"/>
+             <xs:attribute name="swversion" type="xs:string" use="optional"/>
+             <xs:attribute name="osversion" type="xs:string" use="optional"/>
+             <xs:attribute name="checkparams" type="xs:string" use="optional"/>
+         </xs:complexType>
+     </xs:element>
+     <xs:element name="pause">
+         <xs:complexType>
+             <xs:attribute name="id" type="xs:string" use="required"/>
+             <xs:attribute name="msg" type="xs:string" use="required"/>
+             <xs:attribute name="hosts" type="xs:string" use="required"/>
+             <xs:attribute name="server" type="xs:string" use="required"/>
+             <xs:attribute name="dependency" type="xs:string" use="optional"/>
+             <xs:attribute name="optional" type="xs:boolean"/>
+             <xs:attribute name="depsinglehost" type="xs:boolean"/>
+             <xs:attribute name="swversion" type="xs:string" use="optional"/>
+             <xs:attribute name="osversion" type="xs:string" use="optional"/>
+             <xs:attribute name="checkparams" type="xs:string" use="optional"/>
+         </xs:complexType>
+     </xs:element>
+     <xs:element name="notice">
+         <xs:complexType>
+             <xs:attribute name="id" type="xs:string" use="required"/>
+             <xs:attribute name="msg" type="xs:string" use="required"/>
+             <xs:attribute name="hosts" type="xs:string" use="required"/>
+             <xs:attribute name="server" type="xs:string" use="required"/>
+             <xs:attribute name="dependency" type="xs:string" use="optional"/>
+             <xs:attribute name="optional" type="xs:boolean"/>
+             <xs:attribute name="depsinglehost" type="xs:boolean"/>
+             <xs:attribute name="swversion" type="xs:string" use="optional"/>
+             <xs:attribute name="osversion" type="xs:string" use="optional"/>
+             <xs:attribute name="checkparams" type="xs:string" use="optional"/>
+         </xs:complexType>
+     </xs:element>
+     <xs:element name="pausestatus">
+         <xs:complexType>
+             <xs:attribute name="id" type="xs:string" use="required"/>
+             <xs:attribute name="msg" type="xs:string" use="required"/>
+             <xs:attribute name="status" type="xs:string" use="required"/>
+             <xs:attribute name="host" type="xs:string" use="required"/>
+             <xs:attribute name="server" type="xs:string" use="required"/>
+             <xs:attribute name="dependency" type="xs:string" use="optional"/>
+             <xs:attribute name="optional" type="xs:boolean"/>
+             <xs:attribute name="depsinglehost" type="xs:boolean"/>
+             <xs:attribute name="swversion" type="xs:string" use="optional"/>
+             <xs:attribute name="osversion" type="xs:string" use="optional"/>
+             <xs:attribute name="checkparams" type="xs:string" use="optional"/>
+         </xs:complexType>
+     </xs:element>
+     <xs:element name="escapestatus">
+         <xs:complexType>
+             <xs:attribute name="id" type="xs:string" use="required"/>
+             <xs:attribute name="msg" type="xs:string" use="required"/>
+             <xs:attribute name="status" type="xs:string" use="required"/>
+             <xs:attribute name="host" type="xs:string" use="required"/>
+             <xs:attribute name="server" type="xs:string" use="required"/>
+             <xs:attribute name="dependency" type="xs:string" use="optional"/>
+             <xs:attribute name="optional" type="xs:boolean"/>
+             <xs:attribute name="depsinglehost" type="xs:boolean"/>
+             <xs:attribute name="swversion" type="xs:string" use="optional"/>
+             <xs:attribute name="osversion" type="xs:string" use="optional"/>
+             <xs:attribute name="checkparams" type="xs:string" use="optional"/>
+         </xs:complexType>
+     </xs:element>
+     <xs:element name="noticestatus">
+         <xs:complexType>
+             <xs:attribute name="id" type="xs:string" use="required"/>
+             <xs:attribute name="msg" type="xs:string" use="required"/>
+             <xs:attribute name="status" type="xs:string" use="required"/>
+             <xs:attribute name="host" type="xs:string" use="required"/>
+             <xs:attribute name="server" type="xs:string" use="required"/>
+             <xs:attribute name="dependency" type="xs:string" use="optional"/>
+             <xs:attribute name="optional" type="xs:boolean"/>
+             <xs:attribute name="depsinglehost" type="xs:boolean"/>
+             <xs:attribute name="swversion" type="xs:string" use="optional"/>
+             <xs:attribute name="osversion" type="xs:string" use="optional"/>
+             <xs:attribute name="checkparams" type="xs:string" use="optional"/>
+         </xs:complexType>
+     </xs:element>
+     <xs:element name="group">
+         <xs:complexType>
+             <xs:sequence>
+                 <xs:element ref="task" maxOccurs="unbounded" minOccurs="1"/>
+                 <xs:element ref="pause" maxOccurs="unbounded" minOccurs="0"/>
+                 <xs:element ref="escape" maxOccurs="unbounded" minOccurs="0"/>
+                 <xs:element ref="notice" maxOccurs="unbounded" minOccurs="0"/>
+             </xs:sequence>
+             <xs:attribute name="id" type="xs:string" use="required"/>
+         </xs:complexType>
+     </xs:element>
+     <xs:element name="parallel">
+         <xs:complexType>
+             <xs:sequence>
+                 <xs:element ref="task" maxOccurs="unbounded" minOccurs="1"/>
+             </xs:sequence>
+             <xs:attribute name="id" type="xs:string" use="required"/>
+         </xs:complexType>
+     </xs:element>
+     <xs:element name="parallelstatus">
+         <xs:complexType>
+             <xs:sequence>
+                 <xs:element ref="sequencestatus" maxOccurs="unbounded" minOccurs="1"/>
+             </xs:sequence>
+             <xs:attribute name="id" type="xs:string" use="required"/>
+         </xs:complexType>
+     </xs:element>
+     <xs:element name="sequencestatus">
+         <xs:complexType>
+             <xs:sequence>
+                 <xs:element ref="taskstatus" maxOccurs="unbounded" minOccurs="1"/>
+             </xs:sequence>
+             <xs:attribute name="id" type="xs:string" use="required"/>
+             <xs:attribute name="host" type="xs:string" use="required"/>
+             <xs:attribute name="server" type="xs:string" use="required"/>
+         </xs:complexType>
+     </xs:element>
+     <xs:element name="workflow">
+         <xs:complexType>
+             <xs:sequence>
+                 <xs:element name="display">
+                     <xs:complexType>
+                        <xs:choice maxOccurs="unbounded">
+                            <xs:element ref="task" maxOccurs="unbounded" minOccurs="0"/>
+                            <xs:element ref="parallel" maxOccurs="unbounded" minOccurs="0"/>
+                        </xs:choice>
+                     </xs:complexType>
+                 </xs:element>
+                 <xs:element name="pre-check">
+                     <xs:complexType>
+                        <xs:choice maxOccurs="unbounded">
+                            <xs:element ref="task" maxOccurs="unbounded" minOccurs="0"/>
+                            <xs:element ref="parallel" maxOccurs="unbounded" minOccurs="0"/>
+                        </xs:choice>
+                     </xs:complexType>
+                 </xs:element>
+                 <xs:element name="execute">
+                     <xs:complexType>
+                        <xs:choice maxOccurs="unbounded">
+                            <xs:element ref="task" maxOccurs="unbounded" minOccurs="0"/>
+                            <xs:element ref="group" maxOccurs="unbounded" minOccurs="0"/>
+                            <xs:element ref="parallel" maxOccurs="unbounded" minOccurs="0"/>
+                            <xs:element ref="start-tag" maxOccurs="unbounded" minOccurs="0"/>
+                            <xs:element ref="end-tag" maxOccurs="unbounded" minOccurs="0"/>
+                            <xs:element ref="escape" maxOccurs="unbounded" minOccurs="0"/>
+                            <xs:element ref="pause" maxOccurs="unbounded" minOccurs="0"/>
+                            <xs:element ref="notice" maxOccurs="unbounded" minOccurs="0"/>
+                        </xs:choice>
+                     </xs:complexType>
+                 </xs:element>
+                 <xs:element name="post-check">
+                     <xs:complexType>
+                        <xs:choice maxOccurs="unbounded">
+                            <xs:element ref="task" maxOccurs="unbounded" minOccurs="0"/>
+                            <xs:element ref="parallel" maxOccurs="unbounded" minOccurs="0"/>
+                        </xs:choice>
+                     </xs:complexType>
+                 </xs:element>
+             </xs:sequence>
+             <xs:attribute name="name" type="xs:string" use="required"/>
+         </xs:complexType>
+     </xs:element>
+     <xs:element name="workflowsys">
+         <xs:complexType>
+             <xs:sequence>
+                 <xs:element name="displaysys">
+                     <xs:complexType>
+                        <xs:choice maxOccurs="unbounded">
+                            <xs:element ref="taskstatus" maxOccurs="unbounded" minOccurs="0"/>
+                            <xs:element ref="parallelstatus" maxOccurs="unbounded" minOccurs="0"/>
+                        </xs:choice>
+                     </xs:complexType>
+                 </xs:element>
+                 <xs:element name="pre-checksys">
+                     <xs:complexType>
+                        <xs:choice maxOccurs="unbounded">
+                            <xs:element ref="taskstatus" maxOccurs="unbounded" minOccurs="0"/>
+                            <xs:element ref="parallelstatus" maxOccurs="unbounded" minOccurs="0"/>
+                        </xs:choice>
+                     </xs:complexType>
+                 </xs:element>
+                 <xs:element name="executesys">
+                     <xs:complexType>
+                        <xs:choice maxOccurs="unbounded">
+                            <xs:element ref="taskstatus" maxOccurs="unbounded" minOccurs="0"/>
+                            <xs:element ref="start-tag" maxOccurs="unbounded" minOccurs="0"/>
+                            <xs:element ref="end-tag" maxOccurs="unbounded" minOccurs="0"/>
+                            <xs:element ref="escapestatus" maxOccurs="unbounded" minOccurs="0"/>
+                            <xs:element ref="pausestatus" maxOccurs="unbounded" minOccurs="0"/>
+                            <xs:element ref="noticestatus" maxOccurs="unbounded" minOccurs="0"/>
+                            <xs:element ref="parallelstatus" maxOccurs="unbounded" minOccurs="0"/>
+                        </xs:choice>
+                     </xs:complexType>
+                 </xs:element>
+                 <xs:element name="post-checksys">
+                     <xs:complexType>
+                        <xs:choice maxOccurs="unbounded">
+                            <xs:element ref="taskstatus" maxOccurs="unbounded" minOccurs="0"/>
+                            <xs:element ref="parallelstatus" maxOccurs="unbounded" minOccurs="0"/>
+                        </xs:choice>
+                     </xs:complexType>
+                 </xs:element>
+             </xs:sequence>
+             <xs:attribute name="name" type="xs:string" use="required"/>
+         </xs:complexType>
+     </xs:element>
+</xs:schema>

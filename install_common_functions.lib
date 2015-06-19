@@ -1,0 +1,104 @@
+# *************************************************************
+# Common install functions and definitions
+# *************************************************************
+UNKNOWN="unknown"
+SUNOS="SunOs"
+LINUX="Linux"
+OPSYS=${UNKNOWN}
+TAR="tar"
+
+checkparam() {
+    # checks that the supplied parameter is not empty, otherwise exit with error
+    if [ -z $1 ]
+    then
+        echo "empty parameter passed"
+        exit 1
+    fi
+}
+
+checkresult() {
+    # checks that the supplied result code is 0, otherwise exit with error
+    # param $1 set to a return code
+    # param $2 set to an error msg for display if result code is non-zero
+    checkparam $1
+    if [ $1 -ne 0 ]
+    then
+        echo "Error: $2"
+        exit 1
+    fi
+}
+
+
+checkforpackage() {
+   # checks whether the supplied rpm package is installed
+   # param $1 set to package name, if none supplied then displays message and exits with error
+   # returns zero if the module is found, nonzero if module is not found
+   checkparam $1
+   PKGCHECK=$1
+   echo "checking for ${PKGCHECK}"
+   rpm -qa | grep "${PKGCHECK}" > /dev/null 2>&1
+   RET=$?
+   if [ ${RET} -ne 0 ]
+   then
+       echo "unable to find package ${PKGCHECK}"
+   else
+       echo "package ${PKGCHECK} is installed"
+   fi
+   return ${RET}
+}
+
+
+installmodule() {
+    # installs module from supplied directory
+    # param $1 set to the base name (ie without the tar and gz suffix) of the gzip file from which the module is to be installed
+    # if none supplied then displays message and exits with error
+    # if install fails then displays message and exits with error
+    checkparam $1
+    gunzip $1.tar.gz
+    tar xvf $1.tar
+    cd $1
+    checkresult $? "unable to switch to $1 directory"
+    python setup.py install
+    checkresult $? "${CHCK} install failed"
+    cd ..
+}
+
+installifnotpresent() {
+    # checks whether a module is installed, and if not already present then attempts to install it. 
+    # param $1 set to module name
+    # param $2 set to base name of the zipped install directory
+    # param $3 set to install directory if different from $2
+    # if either parameter is empty then displays message and exits with error
+    # if install fails then displays message and exits with error
+    checkparam $1
+    checkparam $2
+
+    INSTMOD=$1
+    INSTBASE=$2
+    if [ -z $3 ]
+    then
+        INSTDIR=$2
+    else
+        INSTDIR=$3
+    fi
+    `python -c "__import__('${INSTMOD}')"` > /dev/null 2>&1
+    if [ $? -ne 0 ]
+    then 
+        echo "module not present - installing ${INSTMOD}"
+        # note that we allow gunzip and tar to fail (in case we of rerun) - but if dir is not there then we will fail
+        gunzip $INSTBASE.tar.gz > /dev/null 2>&1
+        ${TAR} xvf $INSTBASE.tar  > /dev/null 
+        cd ${INSTDIR}
+        checkresult $? "unable to switch to ${INSTDIR} directory"
+        python setup.py install > install_${INSTMOD}.out 2>&1
+        checkresult $? "${INSTMOD} install failed"
+        `python -c "__import__('${INSTMOD}')"` > /dev/null 2>&1
+        checkresult $? "installation of ${INSTMOD} not successful"
+        echo "installation of ${INSTMOD} successful"
+        rm install_${INSTMOD}.out
+        cd ..
+    else
+        echo "${INSTMOD} already installed"
+    fi
+
+}
