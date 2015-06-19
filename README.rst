@@ -26,19 +26,11 @@ Install AWE
 ===========
 
 1. AWE runs on both Solaris and Linux, however the install scripts provided will only work on Solaris.
-
-2. AWE works from a AWE_HOME directory, so prior to beginning the installation set AWE_HOME environment variable to point to the location that you wish AWE to be installed to.
-AWE will create a cfg, xsd, log, license, etc directories for input files and logs.
-The wfeng package that comprises AWE, will be deployed to the lib/wfeng directory under AWE.
-
+2. AWE works from a AWE_HOME directory, so prior to beginning the installation set AWE_HOME environment variable to point to the location that you wish AWE to be installed to.  AWE will create a cfg, xsd, log, license, etc directories for input files and logs. The wfeng package that comprises AWE, will be deployed to the lib/wfeng directory under AWE.
 3. If you wish AWE to be run by a different user to root, then set AWE_USER to the user to be run from.
-
 4. Run bash install.sh to install AWE
-
 5. Set an alias wfeng to point to <AWE_HOME>/lib/workfloweng.py if the install hasn't set one up for you
-
 6. Test the install with: wfeng -h
-
 7. The install will contain an example workflow and hosts file.
 
 AWE directory structure
