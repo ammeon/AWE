@@ -6,7 +6,7 @@
              <xs:attribute name="hosts" use="required">
                  <xs:simpleType>
                      <xs:restriction base="xs:string">
-		         <xs:pattern value="\*|[!]?[0-9]+|[!]?[$]"></xs:pattern>
+		         <xs:pattern value="\*|[!]?[1-9][0-9]*|[!]?[$]"></xs:pattern>
                      </xs:restriction>
                  </xs:simpleType>
              </xs:attribute>
@@ -57,7 +57,13 @@
          <xs:complexType>
              <xs:attribute name="id" type="xs:string" use="required"/>
              <xs:attribute name="msg" type="xs:string" use="required"/>
-             <xs:attribute name="hosts" type="xs:string" use="required"/>
+             <xs:attribute name="hosts" use="required">
+                 <xs:simpleType>
+                     <xs:restriction base="xs:string">
+		         <xs:pattern value="\*|[!]?[1-9][0-9]*|[!]?[$]"></xs:pattern>
+                     </xs:restriction>
+                 </xs:simpleType>
+             </xs:attribute>
              <xs:attribute name="server" type="xs:string" use="required"/>
              <xs:attribute name="dependency" type="xs:string" use="optional"/>
              <xs:attribute name="optional" type="xs:boolean"/>
@@ -71,7 +77,13 @@
          <xs:complexType>
              <xs:attribute name="id" type="xs:string" use="required"/>
              <xs:attribute name="msg" type="xs:string" use="required"/>
-             <xs:attribute name="hosts" type="xs:string" use="required"/>
+             <xs:attribute name="hosts" use="required">
+                 <xs:simpleType>
+                     <xs:restriction base="xs:string">
+		         <xs:pattern value="\*|[!]?[1-9][0-9]*|[!]?[$]"></xs:pattern>
+                     </xs:restriction>
+                 </xs:simpleType>
+             </xs:attribute>
              <xs:attribute name="server" type="xs:string" use="required"/>
              <xs:attribute name="dependency" type="xs:string" use="optional"/>
              <xs:attribute name="optional" type="xs:boolean"/>
@@ -85,7 +97,13 @@
          <xs:complexType>
              <xs:attribute name="id" type="xs:string" use="required"/>
              <xs:attribute name="msg" type="xs:string" use="required"/>
-             <xs:attribute name="hosts" type="xs:string" use="required"/>
+             <xs:attribute name="hosts" use="required">
+                 <xs:simpleType>
+                     <xs:restriction base="xs:string">
+		         <xs:pattern value="\*|[!]?[1-9][0-9]*|[!]?[$]"></xs:pattern>
+                     </xs:restriction>
+                 </xs:simpleType>
+             </xs:attribute>
              <xs:attribute name="server" type="xs:string" use="required"/>
              <xs:attribute name="dependency" type="xs:string" use="optional"/>
              <xs:attribute name="optional" type="xs:boolean"/>
@@ -108,6 +126,8 @@
              <xs:attribute name="swversion" type="xs:string" use="optional"/>
              <xs:attribute name="osversion" type="xs:string" use="optional"/>
              <xs:attribute name="checkparams" type="xs:string" use="optional"/>
+             <xs:attribute name="gid" type="xs:string" use="optional"/>
+             <xs:attribute name="dynamic" type="xs:boolean" use="optional"/>
          </xs:complexType>
      </xs:element>
      <xs:element name="escapestatus">
@@ -123,6 +143,8 @@
              <xs:attribute name="swversion" type="xs:string" use="optional"/>
              <xs:attribute name="osversion" type="xs:string" use="optional"/>
              <xs:attribute name="checkparams" type="xs:string" use="optional"/>
+             <xs:attribute name="gid" type="xs:string" use="optional"/>
+             <xs:attribute name="dynamic" type="xs:boolean" use="optional"/>
          </xs:complexType>
      </xs:element>
      <xs:element name="noticestatus">
@@ -137,17 +159,18 @@
              <xs:attribute name="depsinglehost" type="xs:boolean"/>
              <xs:attribute name="swversion" type="xs:string" use="optional"/>
              <xs:attribute name="osversion" type="xs:string" use="optional"/>
+             <xs:attribute name="gid" type="xs:string" use="optional"/>
              <xs:attribute name="checkparams" type="xs:string" use="optional"/>
          </xs:complexType>
      </xs:element>
      <xs:element name="group">
          <xs:complexType>
-             <xs:sequence>
-                 <xs:element ref="task" maxOccurs="unbounded" minOccurs="1"/>
-                 <xs:element ref="pause" maxOccurs="unbounded" minOccurs="0"/>
-                 <xs:element ref="escape" maxOccurs="unbounded" minOccurs="0"/>
-                 <xs:element ref="notice" maxOccurs="unbounded" minOccurs="0"/>
-             </xs:sequence>
+             <xs:choice minOccurs="1" maxOccurs="unbounded">
+                 <xs:element ref="task" maxOccurs="unbounded"/>
+                 <xs:element ref="pause" maxOccurs="unbounded"/>
+                 <xs:element ref="escape" maxOccurs="unbounded"/>
+                 <xs:element ref="notice" maxOccurs="unbounded"/>
+             </xs:choice>
              <xs:attribute name="id" type="xs:string" use="required"/>
          </xs:complexType>
      </xs:element>

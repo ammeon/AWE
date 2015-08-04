@@ -7,106 +7,38 @@ from fabric.context_managers import settings, hide, show
 # from fabric.operations import local
 from fabric.tasks import execute
 from fabric.state import env
-from fabric.network import disconnect_all
-import constants
+from wfeng import constants
 import os
 import logging
+import threading
 import datetime
 import traceback
 import sys
-import wfconfig
+from wfeng import wfconfig
 # import re
 import subprocess
 # import threading
 import multiprocessing
 from lxml import etree
 import time
-import utils
+from wfeng import utils
+from wfeng import sequenceprocess
+from wfeng.status import WorkflowStatus
 import Queue
+from wfeng.msgtask import EscapeTask, EscapeStatusTask, PauseTask
+from wfeng.msgtask import PauseStatusTask, NoticeTask, NoticeStatusTask
+from wfeng.taskcommons import WTask, StatusTask
+from wfeng.status import WorkflowStatus
+
 # from io import IOBase
 
 # Output for screen
 STOPPING_ERR = "STOPPING as task failed and continue on failure is not set"
-REACHED_VERSION = \
-  "Skipping task {0} on {1} as swver {2} and osver {3} indicates " \
-  "task not required"
-INV_PARAM = "Skip as value for {0} is {1} for host {2} and task {3}"
-NO_PARAM = "Skip as no value for {0} for host {1} and task {2}"
 STATUS_FORMAT = "STATUS %s: %s%s%s, START: %s%s\n"
 PARALLEL_STATUS_FORMAT = "STATUS %s: %s%s%s, START: %s%s\n"
 STATUS_DATEFMT = "%H:%M:%S"
 
 log = logging.getLogger(__name__)
-
-
-class WTask:
-    def __init__(self, name, config):
-        """Initialises task object"""
-        self.name = name
-        self.config = config
-        self.optional = False  # default to False
-        self.run_local = False
-        self.gid = None
-        self.depsinglehost = False
-        self.checkparams = {}
-
-    def hasVersion(self):
-        return False
-
-    def equals(self, task):
-        """ Compares this Task with that described by task, and
-            returns if they are the same.
-            Arguments:
-                task: Task to compare against
-            Returns:
-                True: if same
-                False: if different
-        """
-        if self.name != task.name:
-            return False
-        if self.optional != task.optional:
-            log.debug("Optional differ {0}/{1} for {2}".format(
-                      self.optional, task.optional, self.name))
-            return False
-        if self.run_local != task.run_local:
-            log.debug("Run local differ {0}/{1} for {2}".format(
-                      self.run_local, task.run_local, self.name))
-            return False
-        if self.depsinglehost != task.depsinglehost:
-            log.debug("Dependency_single_host differs %s/%s" % \
-                    (self.depsinglehost,
-                     task.depsinglehost))
-            return False
-
-        return True
-
-    def getStatusTasks(self, host):
-        """ Returns a list of StatusTask objects in order to be processed.
-            Arguments:
-                host: Host to run on, will be ignored
-                status: current status
-            Returns:
-                list of StatusTask classes
-        """
-        return []
-
-    def getTasks(self):
-        """ Returns list of tasks that this represents. For base class this is
-            just itself"""
-        log.log(constants.TRACE, "Base getTasks called")
-        return [self]
-
-    def needsHost(self):
-        """ Returns if this task applies only to particular hosts"""
-        return False
-
-    def isTag(self):
-        """ Indicates if this is a tag task"""
-        return False
-
-    def isParallel(self):
-        """ Indicates if this is a parallel task"""
-        return False
 
 
 class FabricTask(WTask):
@@ -208,6 +140,11 @@ class FabricTask(WTask):
         """ Runs fabric task (local or remote):
             ps_logger is a process safe logger
             Arguments: host Host object to run on
+                       infoprefixes: List of info prefixes to look for
+                       errprefixes: List of info prefixes to look for
+                       output_level: Log level
+                       host_colour: colour to use
+                       ps_logger: Process safe logger
             Returns result object
         """
         os.environ['SERVERNAME'] = host.hostname
@@ -218,7 +155,8 @@ class FabricTask(WTask):
 
         ):
             result = self._do_execute(host, infoprefixes, errprefixes,
-                                            output_level, host_colour, ps_logger)
+                                            output_level, host_colour,
+                                            ps_logger)
         return result
 
     def getFullCmd(self, host):
@@ -235,7 +173,12 @@ class FabricTask(WTask):
     def getLogStr(self, host):
         return "Running %s" % self.getCmdHostLogStr(host)
 
-    def _do_execute(self, host, infoprefixes, errprefixes, output_level, ps_logger):
+    def getCmdHostLogStr(self, host):
+        raise Exception(
+               "Base getCmdHostLogStr of FabricTask should never be run")
+
+    def _do_execute(self, host, infoprefixes, errprefixes, output_level,
+                          host_colour, ps_logger):
         raise Exception("Base do_execute of FabricTask should never be run")
 
     def __str__(self):
@@ -245,7 +188,7 @@ class FabricTask(WTask):
                          self.continueOnFail, self.optional, self.run_local)
 
     def process_result(self, result, status, host, has_status, stype,
-                             err_prefixes, info_prefixes):
+                             err_prefixes, info_prefixes, logger):
         """ Processes a Fabric Result object and populates a generic
             RunStatus.
             Arguments: result: retruned from task's process_result
@@ -255,21 +198,22 @@ class FabricTask(WTask):
                        stype: expected server type
                        err_prefixes: Error line prefix for display
                        info_prefixes: Info line prefix
+                       logger: Process-safe logger
         """
         status.returncode = -1
         if hasattr(result, "return_code"):
             status.returncode = result.return_code
             status.stdout = result.stdout
             self._parseResp(host, result, has_status, stype,
-                               status, err_prefixes, info_prefixes)
+                               status, err_prefixes, info_prefixes, logger)
         else:
-            log.debug("Not got a return code so will be an error")
+            logger.debug("Not got a return code so will be an error")
             status.status = constants.FAILED
             status.err_msg = str(result)
             status.stdout = None
 
     def _parseResp(self, host, result, has_status, stype, status,
-                                errprefixes, infoprefixes):
+                                errprefixes, infoprefixes, logger):
         """Parses result from a remote task that succeeded
            Arguments:
                host: Host object to populate with parameters
@@ -281,11 +225,12 @@ class FabricTask(WTask):
                               displayed as error
                infoprefixes: Used if has_status is true, and could have
                            status (info) line
+               logger: process-safe logger
         """
         status.err_msg = None
         errLines = []
         foundStatus = False
-        log.debug("Parsing STDOUT for {0}_{1}:".format(self.name,
+        logger.debug("Parsing STDOUT for {0}_{1}:".format(self.name,
                                                        host.hostname))
         lines = result.stdout.split("\n")
         setvarprefix = self.config.cfg[wfconfig.SETVAR]
@@ -301,7 +246,7 @@ class FabricTask(WTask):
                 lvars = varLine.split(' ')
                 varname = lvars[0]
                 varvalue = varLine[len(varname) + 1:].lstrip()
-                log.debug("Extracted parameter %s" % varname)
+                logger.debug("Extracted parameter %s" % varname)
                 os.environ[varname] = varvalue
             else:
                 for infoprefix in infoprefixes:
@@ -309,14 +254,14 @@ class FabricTask(WTask):
                         # Strip out any x=y contained in line
                         if "=" in line:
                             foundStatus = True
-                            log.debug("Found info status line {0}".\
+                            logger.debug("Found info status line {0}".\
                                            format(line))
                             statusline = line.split(infoprefix,
                                            1)[1].lstrip().strip()
                             status.err_msg = self._parseStatusLine(\
                                               host,
                                               statusline, stype,
-                                              infoprefix)
+                                              infoprefix, logger)
                             if status.err_msg == None:
                                 # status.logdata = line
                                 status.logdata = statusline
@@ -333,13 +278,14 @@ class FabricTask(WTask):
                 status.err_msg = "{0} messages detected".format(
                                                 errprefixes)
 
-    def _parseStatusLine(self, host, statusline, stype, infoprefix):
+    def _parseStatusLine(self, host, statusline, stype, infoprefix, logger):
         """Parses display status line
            Arguments:
                host: Host object to update
                statusline: Contents of statusline after STATUS prefix
                stype: expected server type
                infoprefix: status prefix
+               logger: process-safe logger
            Returns:
                None: if successfully parsed, else error description
         """
@@ -351,7 +297,7 @@ class FabricTask(WTask):
             tagvalue = value.split("=")
             if len(tagvalue) == 2:
                 k, v = value.split("=")
-                log.log(constants.TRACE, "Adding key {0}".format(k))
+                logger.log(constants.TRACE, "Adding key {0}".format(k))
                 if not host.add_param(k, v):
                     err_msg = "Parameter %s has changed since previous run" % k
                     return err_msg
@@ -369,7 +315,7 @@ class FabricTask(WTask):
                         stype,
                          host.params[type_key])
             else:
-                log.log(constants.TRACE,
+                logger.log(constants.TRACE,
                       "Missing {0} from {1} line".format(type_key,
                                                             infoprefix))
         return err_msg
@@ -457,7 +403,7 @@ class LocalFabricTask(FabricTask):
 
         p = subprocess.Popen(cmd, shell=True,
                                       stdout=subprocess.PIPE,
-                                      stderr=subprocess.PIPE)
+                                      stderr=subprocess.STDOUT)
         result = DummyResult()
         if self.servertype == constants.LOCAL:
             prefix = "{0}_LOCAL".format(self.name)
@@ -465,24 +411,17 @@ class LocalFabricTask(FabricTask):
             prefix = "{0}_{1}".format(self.name, host.hostname)
         while 1:
             out = p.stdout.readline()
-            err = p.stderr.readline()
-            if not out and not err:
+            if not out:
                 break
             else:
                 if out:
                     if not utils.processLineForTags(out, infoprefixes,
                                        errprefixes,
-                                       ps_logger, prefix, output_level, host_colour):
+                                       ps_logger, prefix, output_level,
+                                       host_colour):
                         ps_logger.log(constants.DEBUGNOTIME, "  -->{0}: {1}"\
                                 .format(prefix, out))
                     result.stdout = "%s%s\n" % (result.stdout, out)
-                if err:
-                    if not utils.processLineForTags(out, infoprefixes,
-                             errprefixes,
-                             ps_logger, prefix, output_level, host_colour):
-                        ps_logger.log(constants.DEBUGNOTIME, "  -->{0}: {1}"\
-                                 .format(prefix, err))
-                    result.stderr = "%s%s\n" % (result.stderr, err)
         p.wait()
         if p.returncode != 0:
             result.failed = True
@@ -537,7 +476,7 @@ class GroupTask(WTask):
                              task.servertype == self.servertype:
                 self.tasks.append(task)
                 if self.optional and not task.optional:
-                     # Group is only optional if every task in it is optional
+                    # Group is only optional if every task in it is optional
                     self.optional = False
                 return True
             else:
@@ -578,7 +517,15 @@ class GroupTask(WTask):
         """
         stasks = []
         for task in self.tasks:
-            stasks.append(FabricStatusTask(task, host, constants.INITIAL))
+
+            if isinstance(task, EscapeTask):
+                stasks.append(EscapeStatusTask(task, host, constants.INITIAL))
+            elif isinstance(task, PauseTask):
+                stasks.append(PauseStatusTask(task, host, constants.INITIAL))
+            elif isinstance(task, NoticeTask):
+                stasks.append(NoticeStatusTask(task, host, constants.INITIAL))
+            else:
+                stasks.append(FabricStatusTask(task, host, constants.INITIAL))
         return stasks
 
     def getTasks(self):
@@ -626,187 +573,6 @@ class FabricTaskManager:
                                        checkparams, gid)
 
 
-class StatusTask:
-    def __init__(self, task, status):
-        self.task = task
-        self.status = status
-        self.actualDuration = None
-        self.actualDurationInt = -1L
-
-    def containsTask(self, taskname):
-        """ Returns if this task contains taskname """
-        return self.task.name == taskname
-
-    def isParallelStatusTask(self):
-        """ Indicates if this is a parallel status task"""
-        return False
-
-
-    def setStatus(self, status):
-        self.status = status
-
-    def logCommand(self):
-        """ Does nothing, but on tasks that might skip can output details of
-            task"""
-        pass
-
-    def isEquivalent(self, stask):
-        """ Compares this StatusTask with that described by stask, and
-            if they are the same ignoring status then they are equivalent
-            Arguments:
-                stask: StatusTask to compare against
-            Returns:
-                True: if same ignoring status
-                False: if different
-        """
-        if not self.task.equals(stask.task):
-            log.debug("Task %s didn't match" % self.task.name)
-            return False
-        return True
-
-    def run(self, output_func, phasename, wfsys, task,
-                  alwaysRun, options):
-        """ Base method for running_task, expected to be always overridden"""
-        output_func("INVALID TASK %s" % self.task.name, True)
-        return False
-
-    def hasHost(self):
-        """ Returns if this status task applies only to particular hosts"""
-        return False
-
-    def askSkip(self):
-        """ Returns whether valid to ask whether to skip this task """
-        return False
-
-    def hasDependency(self):
-        """ Returns if this StatusTask is dependant on another"""
-        return False
-
-    def shouldRunOnHost(self, servertype, servername, excluded, inputmgr,
-                              force, exact_match):
-        """ Determines whether to run, returns True if hasHost is False,
-            else expects task to have host parameter to check on,
-            and swversion """
-        run_on_server = True
-        if self.hasHost():
-            if self.task.servertype != constants.LOCAL:
-                # Always run on locals unless specified a task id
-                if servertype != constants.ALL:
-                    # Check if server type is correct
-                    if self.host.servertype != servertype:
-                        log.debug(
-                             "Skipping task %s on %s as server not type %s" \
-                                % (self.task.name, self.host.hostname,
-                                   servertype))
-                        run_on_server = False
-
-                if servername != constants.ALL:
-                    if self.host.hostname != servername:
-                        log.debug("Skipping task %s on %s as host not %s" \
-                              % (self.task.name, self.host.hostname,
-                                 servername))
-                        run_on_server = False
-
-                for exclude in excluded:
-                    if self.host.hostname == exclude:
-                        log.debug(
-                          "Skipping task %s on %s as host excluded" % \
-                                 (self.task.name, self.host.hostname))
-                        run_on_server = False
-
-                # Now check for swversion if we need it
-                swMatch = False
-                swversion = None
-                testSwMatch = False
-                if run_on_server and \
-                     self.task.hasVersion() and self.task.swversion != None:
-                    # if version starts with $ then we are looking for a matching param
-                    taskversion=utils.extractIniParam(self.task.config.iniparams, self.task.swversion)
-                    if taskversion != self.task.swversion:
-                        log.debug("Taken task swversion %s from ini file parameter %s" \
-                            % (taskversion, self.task.swversion))
-                    if taskversion != None:
-                        testSwMatch = True
-                        swversion = self.getSWVersion()
-                        if swversion == None and not force:
-                            swversion = inputmgr.getVersion("software",
-                                                  self.host.hostname)
-                            if swversion != None:
-                                self.setSWVersion(swversion)
-                        if utils.check_version(taskversion, swversion,
-                                           exact_match):
-                            swMatch = True
-
-                # Now check for osversion if we need it
-                osMatch = False
-                osversion = None
-                testOsMatch = False
-                if run_on_server and \
-                     self.task.hasVersion() and self.task.osversion != None:
-                    taskversion=utils.extractIniParam(self.task.config.iniparams, self.task.osversion)
-                    if taskversion != self.task.osversion:
-                        log.debug("Taken task osversion %s from ini file parameter %s" \
-                            % (taskversion, self.task.osversion))
-                    if taskversion != None:
-                        testOsMatch = True
-                        osversion = self.getOSVersion()
-                        if osversion == None and not force:
-                            osversion = inputmgr.getVersion("OS",
-                                                  self.host.hostname)
-                            if osversion != None:
-                                self.setOSVersion(osversion)
-                        if utils.check_version(taskversion, osversion,
-                                           exact_match):
-                             osMatch = True
-                if run_on_server:
-                    # Work out results of version check
-                    if (testOsMatch and not osMatch) or \
-                       (testSwMatch and not swMatch) or \
-                       (not testOsMatch and not testSwMatch):
-                        log.debug("Passed version check so run task")
-                    else:
-                        # already at correct osversion/swversion
-                        log.debug(REACHED_VERSION.format(self.task.name,
-                                                  self.host.hostname,
-                                                  swversion,
-                                                  osversion))
-                        self.status = constants.REACHED_VERSION
-                        run_on_server = False
-                if run_on_server:
-                    for key, val in self.task.checkparams.iteritems():
-                        if not key in self.host.params:
-                            log.debug(NO_PARAM.format(key, self.host.hostname,
-                                          self.task.name))
-                            self.status = constants.PARAM_NOTMATCH
-                            run_on_server = False
-                        else:
-                            vals = val.split("|")
-                            found = False
-                            for eachval in vals:
-                                if self.host.params[key] == eachval:
-                                    found = True
-                            if not found:
-                                log.debug(INV_PARAM.format(key,
-                                     self.host.params[key],
-                                     self.host.hostname,
-                                    self.task.name))
-                                self.status = constants.PARAM_NOTMATCH
-                                run_on_server = False
-        return run_on_server
-
-    def getTaskStatusList(self, taskid):
-        # returns task status object, related to this task
-        if self.task.name == taskid:
-            return [self]
-        return []
-
-    def getCounts(self):
-        """ Returns tuple of numSuccess, numFailed, numSkipped related to
-            how many tasks succeeded, failed, skipped. As single task
-            only 1 value will be non-zero """
-        return utils.getStatusCount(self.status, self.task.name, log)
-
-
 class FabricStatusTask(StatusTask):
     """ Represents a workflow task with status """
     def __init__(self, task, host, status):
@@ -820,7 +586,7 @@ class FabricStatusTask(StatusTask):
         self.host = host
         self.logged = False
 
-    def logCommand(self):
+    def logDetails(self):
         log.info("TASK %s: %s ..." % \
                      (self.getId(), self.task.getLogStr(self.host)))
         self.logged = True
@@ -835,10 +601,12 @@ class FabricStatusTask(StatusTask):
                 False: if different
         """
         if not self.task.equals(stask.task):
-            log.debug("Task %s didn't match" % self.task.name)
+            log.debug("Task %s didn't match %s" % (self.task.name,
+                                 stask.task.name))
             return False
         if not self.host.equals(stask.host):
-            log.debug("Host %s didn't match" % self.host.hostname)
+            log.debug("Host %s didn't match %s" % (self.host.hostname,
+                        stask.host.hostname))
             return False
         return True
 
@@ -866,6 +634,7 @@ class FabricStatusTask(StatusTask):
             return WorkflowStatus(WorkflowStatus.COMPLETE, "")
         spinnerThread = None
         env.parallel = False
+        env.eager_disconnect = True
         env.linewise = True
         env.skip_bad_hosts = True
         logger.debug("Run %s on %s/%s (runLocal=%s), state %s" % \
@@ -903,9 +672,11 @@ class FabricStatusTask(StatusTask):
             cur_status = constants.RUNNING
             duration = ""
             if self.task.duration != None:
-                estduration=utils.extractIniParam(self.task.config.iniparams, self.task.duration)
+                estduration = utils.extractIniParam(
+                               self.task.config.iniparams, self.task.duration)
                 if estduration != self.task.duration:
-                    log.debug("Taken task est duration %s from ini file parameter %s" \
+                    logger.debug(
+                      "Taken task est duration %s from ini file parameter %s" \
                             % (estduration, self.task.duration))
                 if estduration == "" or estduration == None:
                     duration = ""
@@ -936,12 +707,13 @@ class FabricStatusTask(StatusTask):
             err_prefixes = err_prefixstr.split(",")
             info_prefixes = info_prefixstr.split(",")
             result = self.task.execute(self.host, info_prefixes, err_prefixes,
-                                       options.output_level, host_colour, logger)
+                                       options.output_level, host_colour,
+                                       logger)
             endtime = datetime.datetime.now()
             status = RunStatus()
             self.task.process_result(result, status, self.host,
                                           has_status, self.task.servertype,
-                                          err_prefixes, info_prefixes)
+                                          err_prefixes, info_prefixes, logger)
             logger.debug("%s: Parameters extracted:%s" % \
                                              (genid, repr(self.host.params)))
             self.status = status.status
@@ -1011,40 +783,6 @@ class FabricStatusTask(StatusTask):
         """ Returns the hosts this applies to """
         return [self.host]
 
-    def getSWVersion(self):
-        """ Returns the swversion associated with this task, or None if unknown
-            Returns:
-                String representing the swver or None if swversion unknown
-        """
-        swkey = self.task.config.cfg[wfconfig.SWVER]
-        if not swkey in self.host.params:
-            return None
-        if self.host.params[swkey] == wfconfig.UNKNOWN:
-            return None
-        return self.host.params[swkey]
-
-    def getOSVersion(self):
-        """ Returns the osversion associated with this task, or None if unknown
-            Returns:
-                String representing the osver or None if osversion unknown
-        """
-        oskey = self.task.config.cfg[wfconfig.OSVER]
-        if not oskey in self.host.params:
-            return None
-        if self.host.params[oskey] == wfconfig.UNKNOWN:
-            return None
-        return self.host.params[oskey]
-
-    def setSWVersion(self, swversion):
-        """ Sets the swversion parameter on host """
-        swkey = self.task.config.cfg[wfconfig.SWVER]
-        self.host.params[swkey] = swversion
-
-    def setOSVersion(self, osversion):
-        """ Sets the osversion parameter on host """
-        oskey = self.task.config.cfg[wfconfig.OSVER]
-        self.host.params[oskey] = osversion
-
     def hasDependency(self):
         """ Returns if this StatusTask is dependant on another"""
         return (self.task.dependency != None)
@@ -1093,37 +831,6 @@ class WorkflowException(Exception):
     # Used for handling fabric aborts
     def __init__(self, value, err_prefix):
         self.value = value
-
-
-class WorkflowStatus:
-    """ Returns status of running workflow"""
-    COMPLETE = 0
-    FAILED = 1
-    USER_INPUT = 2
-    STOPPED = 3
-
-    def __init__(self, status, user_msg, success_msg=None):
-        self.status = status
-        self.user_msg = user_msg
-        self.success_msg = success_msg
-        self.continueresponse = "y"
-        self.stopresponse = "n"
-
-    def isStopResponse(self, answer):
-        """ Method that indicates if 'answer' indicates should stop workflow.
-        """
-        if answer == self.stopresponse:
-            return True
-        else:
-            return False
-
-    def isValidResponse(self, answer):
-        """ Method that indicates if 'answer' is valid response
-        """
-        if answer == self.stopresponse or answer == self.continueresponse:
-            return True
-        else:
-            return False
 
 
 class TagTask(WTask):
@@ -1393,7 +1100,7 @@ class ParallelStatusTask(StatusTask):
         for seq in self.sequences:
             seq.setStatus(status)
 
-    def logCommand(self):
+    def logDetails(self):
         hostStr = ""
         hosts = self.getHosts()
         for host in hosts:
@@ -1474,34 +1181,37 @@ class ParallelStatusTask(StatusTask):
                 hostlist.append(seq.host)
         return hostlist
 
-    def listTasks(self, servertype, servername, excluded, input,
+    def listTasks(self, servertypes, servernames, excluded, input,
                        force, exact_match):
         """ Returns a list of tuples of tasks/booleans, where boolean is
             true if should run on server, false if not """
         ret = []
         for seq in self.sequences:
             for task in seq.tasks:
-                if task.shouldRunOnHost(servertype, servername, excluded,
+                if task.shouldRunOnHost(servertypes, servernames, excluded,
                         input, force, exact_match):
                     ret.append((task, True))
                 else:
                     ret.append((task, False))
         return ret
 
-    def sequenceNoneToRun(self, servertype, servername, excluded, input,
+    def sequenceNoneToRun(self, servertypes, servernames, excluded, input,
                        force, exact_match):
-        """returns True if the sequence has no tasks runnable for the given parameters, or False if any task in the sequence is eligible to run"""
+        """returns True if the sequence has no tasks runnable for the given
+           parameters, or False if any task in the sequence is eligible to
+           run"""
         ret = True
         for seq in self.sequences:
             for task in seq.tasks:
-                # only check status on those tasks that are eligible for the given run parameters
-                if task.shouldRunOnHost(servertype, servername, excluded,
+                # only check status on those tasks that are eligible for
+                # the given run parameters
+                if task.shouldRunOnHost(servertypes, servernames, excluded,
                         input, force, exact_match):
-                    # if task status is not in SUCCESS_STATUSES then it could be eligible for run
-                    if not task.status in constants.SUCCESS_STATUSES :
+                    # if task status is not in SUCCESS_STATUSES then it could
+                    # be eligible for run
+                    if not task.status in constants.SUCCESS_STATUSES:
                         ret = False
         return ret
-
 
     def run(self, output_func, phasename, wfsys, task,
                   alwaysRun, options):
@@ -1516,14 +1226,14 @@ class ParallelStatusTask(StatusTask):
         sequenceThreads = []
         stoppedThreads = []
         spinnerThread = None
+        log_queue_reader = None
         statusQueue = multiprocessing.Queue()
         try:
             log.info("PARALLEL_TASK %s: START" % \
                      (self.getId()))
-            if not options.nospinner:
-                spinnerThread = utils.SpinnerThread(output_func, False)
-                spinnerThread.start()
 
+            # Create a SyncManager so can create objects to share with
+            # processes
             # Start a thread per sequence that is not already success
             for i in range(len(self.sequences)):
                 host_colour = constants.Colours.host_colours[i % \
@@ -1535,24 +1245,38 @@ class ParallelStatusTask(StatusTask):
                     # then no need to send specific task id to
                     # sequence
                     seqTask = None
-                sequenceThread = SequenceProcess(self.sequences[i],
+                sequenceThread = sequenceprocess.SequenceProcess(
+                                 self.sequences[i],
                                  output_func, phasename, wfsys,
                                  host_colour, seqTask, alwaysRun,
                                  options, statusQueue)
-                if sequenceThread.willRun():
+                if sequenceThread.will_run(log):
                     log.log(constants.TRACE,
                            "Starting thread for sequence {0}".format(\
                            self.sequences[i].id))
                     sequenceThreads.append(sequenceThread)
                     sequenceThread.start()
                     stoppedThreads.append(False)
+                    # So as to not flood ssh service with lots of connection
+                    # requests at same time
+                    time.sleep(options.parallel_delay)
                 else:
                     log.log(constants.TRACE,
                            "Log only for sequence {0}".format(\
                            self.sequences[i].id))
                     sequenceThreads.append(None)
-                    sequenceThread.log_only()
+                    self._log_sequence(self.sequences[i])
+                    sequenceThread.status = \
+                             WorkflowStatus(WorkflowStatus.COMPLETE, "")
                     stoppedThreads.append(True)
+
+            # Start spinner and queue reader after created sequence threads
+            # so that the created processes do not inherit this thread
+            log_queue_reader = LogQueueReader(wfsys.logqueue)
+            log_queue_reader.start()
+            if not options.nospinner:
+                spinnerThread = utils.SpinnerThread(output_func, False)
+                spinnerThread.start()
 
             log.log(constants.TRACE, "Wait for threads to complete")
             allStopped = False
@@ -1603,6 +1327,10 @@ class ParallelStatusTask(StatusTask):
                 spinnerThread.stop()
                 spinnerThread.join()
                 spinnerThread = None
+            if log_queue_reader != None:
+                log_queue_reader.stop()
+                log_queue_reader.join()
+                log_queue_reader = None
             log.info("PARALLEL_TASK %s: END\n" % \
                      (self.getId()))
         wfstatus = None
@@ -1614,6 +1342,28 @@ class ParallelStatusTask(StatusTask):
             elif i.wfstatus.value == 'c' and wfstatus != WorkflowStatus.FAILED:
                 wfstatus = WorkflowStatus.COMPLETE
         return WorkflowStatus(wfstatus, "")
+
+    def _log_sequence(self, seq):
+        """ Logs whole sequence as its not going to run"""
+        for i in range(len(seq.tasks)):
+            hostip = seq.tasks[i].host.ipaddr
+            if seq.tasks[i].task.servertype == constants.LOCAL or \
+                seq.tasks[i].task.run_local == True:
+                hostip = constants.LOCAL
+            hoststr = " on {0}".format(hostip)
+
+            if seq.tasks[i].status not in \
+                                     constants.SUCCESS_STATUSES:
+                seq.tasks[i].status = constants.SKIPPED
+            utils.logSkippedTask(log, seq.tasks[i],
+                        hoststr)
+        log.log(constants.TRACE,
+                  "Sequence {0} completed".format(seq.id))
+        seq.wfstatus.value = seq.getWfValue(WorkflowStatus.COMPLETE)
+        log.log(constants.TRACE,
+                  "Set status for seq {0} to {1}".format(seq.id,
+                            seq.wfstatus.value))
+        return
 
     def getCounts(self):
         """ Returns tuple of numSuccess, numFailed, numSkipped related to
@@ -1630,7 +1380,7 @@ class ParallelStatusTask(StatusTask):
 
         return (numSuccess, numFailed, numSkipped)
 
-    def shouldRunOnHost(self, servertype, servername, excluded, inputmgr,
+    def shouldRunOnHost(self, servertypes, servernames, excluded, inputmgr,
                               force, exact_match):
         """ We should run if any of the tasks in our sequences say to run
         """
@@ -1638,7 +1388,7 @@ class ParallelStatusTask(StatusTask):
         for seq in self.sequences:
             for i in range(len(seq.tasks)):
                 task = seq.tasks[i]
-                if task.shouldRunOnHost(servertype, servername,
+                if task.shouldRunOnHost(servertypes, servernames,
                                         excluded, inputmgr, force,
                                         exact_match):
                     run_on_server = True
@@ -1718,8 +1468,6 @@ class SequenceStatusTask(StatusTask):
         """ Makes ready for processing, by creating a shared array object
             statuses that can access from main and subprocess.
             Also creates wfstatus with overall workflow status"""
-        manager = multiprocessing.Manager()
-        self.hostparams = manager.dict()
         self.wfstatus = multiprocessing.Value('c',
                             self.getWfValue(self.status))
 
@@ -1760,202 +1508,60 @@ class DummyResult:
         self.return_code = -1
 
 
-class SequenceProcess(multiprocessing.Process):
-    def __init__(self, sequence, outputfunc, phasename, wfsys,
-                       host_colour, task, alwaysRun, options,
-                       queue):
-        super(SequenceProcess, self).__init__()
-        self.output_func = outputfunc
-        self.phasename = phasename
-        self.seq = sequence
-        self.status = None
-        self.logger = logging.getLogger('sub.wfeng')
-        self.wfsys = wfsys
-        self.host_colour = host_colour
-        self.task = task
-        self.alwaysRun = alwaysRun
-        self.options = options
+class LogQueueReader(threading.Thread):
+    """thread to write subprocesses log records to main process log
+
+    This thread reads the records written by subprocesses and writes them to
+    the handlers defined in the main process's handlers.
+    """
+
+    def __init__(self, queue):
+        threading.Thread.__init__(self)
         self.queue = queue
+        self.daemon = True
+        self.do_stop = threading.Event()
+
+    def stop(self):
+        self.do_stop.set()
 
     def run(self):
-        """ Runs each of its tasks sequentially unless task
-            is specified"""
-        try:
-            for i in range(len(self.seq.tasks)):
-                hostip = self.seq.tasks[i].host.ipaddr
-                if self.seq.tasks[i].task.servertype == constants.LOCAL or \
-                    self.seq.tasks[i].task.run_local == True:
-                    hostip = constants.LOCAL
-                hoststr = " on {0}".format(hostip)
-
-                self.seq.should_run_task[i] = self._task_will_run(i)
-                if not self.seq.should_run_task[i]:
-                    if self.seq.tasks[i].status not in \
-                                     constants.SUCCESS_STATUSES:
-                        self.seq.tasks[i].status = constants.SKIPPED
-                if self.seq.should_run_task[i] == False:
-                    utils.logSkippedTask(self.logger, self.seq.tasks[i],
-                        hoststr)
-                    self.status = WorkflowStatus(WorkflowStatus.COMPLETE, "")
+        """read from the queue and write to the log handlers"""
+        while not self.do_stop.isSet():
+            try:
+                record = self.queue.get(True, 1)
+                reclog = logging.getLogger(record.name)
+                # Items added by wfeng directly are coming out as record
+                # root, so use our logger for them
+                if record.name == "root":
+                    log.callHandlers(record)
                 else:
-                    self.logger.log(constants.TRACE,
-                         "Calling task {0}".format(self.seq.tasks[i].getId()))
-                    self.status = self.seq.tasks[i].run(self.output_func,
-                                                self.phasename, self.wfsys,
-                                                self.task,
-                                                self.alwaysRun,
-                                                self.options,
-                                                True,
-                                                self.logger,
-                                                self.host_colour)
+                    reclog.callHandlers(record)
+            except Queue.Empty:
+                continue
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except EOFError:
+                break
+            except:
+                traceback.print_exc(file=sys.stderr)
 
-                durVal = None
-                if self.seq.tasks[i].actualDurationInt != -1:
-                    durVal = self.seq.tasks[i].actualDurationInt
-                statusobj = StatusObject(self.seq.id, i,
-                                self.seq.tasks[i].status,
-                                durVal, self.seq.host.params)
-                self.logger.log(constants.TRACE,
-                   "Adding {0} to queue with status {1},seq{2},ind{3}".format(\
-                   self.seq.tasks[i].getId(),
-                   self.seq.tasks[i].status, self.seq.id, i))
-                self.queue.put(statusobj, True)
-                if self.status.status != WorkflowStatus.COMPLETE:
-                    # Stop at first one that doesn't indicate it completed
-                    self.logger.log(constants.TRACE,
-                       "Sequence {0} stopping as not complete".format(\
-                              self.seq.id))
-                    self.seq.wfstatus.value = \
-                          self.seq.getWfValue(self.status.status)
-                    self.logger.log(constants.TRACE,
-                      "Set status for seq {0} to {1}".format(self.seq.id,
-                            self.seq.wfstatus.value))
-                    return
-
-            self.logger.log(constants.TRACE,
-                  "Sequence {0} completed".format(self.seq.id))
-            self.seq.wfstatus.value = self.seq.getWfValue(self.status.status)
-            self.logger.log(constants.TRACE,
-                  "Set status for seq {0} to {1}".format(self.seq.id,
-                            self.seq.wfstatus.value))
-        finally:
-            with settings(
-                hide('everything', 'aborts', 'status')
-            ):
-                disconnect_all()
-            self.queue.close()
-        return
-
-    def willRun(self):
-        """ Returns if there will be tasks to run"""
-        will_run = False
-        for i in range(len(self.seq.tasks)):
-            if self._task_will_run(i):
-                will_run = True
-        return will_run
-
-    def _task_will_run(self, i):
-        """ Returns whether this task needs to be run.
-            Arguments:
-               i, index into tasks array """
-
-        will_run = True
-        if not self.alwaysRun and \
-            self.seq.tasks[i].status in constants.SUCCESS_STATUSES:
-            will_run = False
-        elif self.seq.should_run_task[i] == False:
-            will_run = False
-        elif self.seq.should_run_task[i] == True and \
-              self.seq.tasks[i].hasDependency():
-            dependencies = self.seq.tasks[i].task.dependency.split(",")
-            for dep in dependencies:
-                # If dependency in this sequence then get its status
-                if self.seq.hasTask(dep):
-                    dstatus = self.seq.getTaskStatus(dep)
+        # Now check nothing at end of queue
+        queueempty = False
+        while not queueempty:
+            try:
+                record = self.queue.get(True, 1)
+                reclog = logging.getLogger(record.name)
+                # Items added by wfeng directly are coming out as record
+                # root, so use our logger for them
+                if record.name == "root":
+                    log.callHandlers(record)
                 else:
-                    depTask = self.wfsys.getTask(dep)
-                    # Dependant on task on all nodes unless this task is in
-                    # this sequence, or depsinglehost was set
-                    dstatus = constants.SKIPPED
-                    if depTask != None:
-                        hostsToCheck = constants.ALL
-                        if self.seq.tasks[i].task.depsinglehost:
-                            hostsToCheck = self.seq.tasks[i].host.hostname
-                        dstatus = self.wfsys.getTaskStatus(dep,
-                          hostsToCheck)
-                        log.log(constants.TRACE,
-                           "Dependency {0} on {1} status {2}".format(\
-                            depTask.name, hostsToCheck, dstatus))
-                if dstatus not in constants.SUCCESS_STATUSES:
-                    log.debug(\
-                       "Skipping task %s as dependency %s not passed %s" \
-                       % (self.seq.tasks[i].task.name, dep,
-                       dstatus))
-                    will_run = False
-                    break
-        if self.seq.should_run_task[i] and self.task != None:
-            if self.task != self.seq.tasks[i].task.name:
-                will_run = False
-
-        return will_run
-
-    def log_only(self):
-        """ Logs each of its task as have determined they all
-            will be skipped"""
-        for i in range(len(self.seq.tasks)):
-            hostip = self.seq.tasks[i].host.ipaddr
-            if self.seq.tasks[i].task.servertype == constants.LOCAL or \
-                self.seq.tasks[i].task.run_local == True:
-                hostip = constants.LOCAL
-            hoststr = " on {0}".format(hostip)
-
-            if self.seq.tasks[i].status not in \
-                                     constants.SUCCESS_STATUSES:
-                self.seq.tasks[i].status = constants.SKIPPED
-            utils.logSkippedTask(self.logger, self.seq.tasks[i],
-                        hoststr)
-            self.status = WorkflowStatus(WorkflowStatus.COMPLETE, "")
-
-        self.logger.log(constants.TRACE,
-                  "Sequence {0} completed".format(self.seq.id))
-        self.seq.wfstatus.value = self.seq.getWfValue(self.status.status)
-        self.logger.log(constants.TRACE,
-                  "Set status for seq {0} to {1}".format(self.seq.id,
-                            self.seq.wfstatus.value))
-        return
-
-
-class StatusObject(object):
-
-    def __init__(self, seqname, taskindex, status, duration, hostparams):
-        self.seqname = seqname
-        self.taskindex = taskindex
-        self.status = status
-        self.duration = duration
-        self.hostparams = hostparams
-
-    def process(self, sequences, wfsys, options):
-        """ Update sequences with status """
-        seq = None
-        for a in sequences:
-            if a.id == self.seqname:
-                seq = a
-        if seq == None:
-            log.error("Internal error, failed to find seq {0}".format(seqname))
-            return
-        log.log(constants.TRACE,
-               "Removed {0} from queue with status {1},seq{2},ind{3}".format(\
-               seq.tasks[self.taskindex].getId(),
-               self.status, seq.id, self.taskindex))
-        seq.tasks[self.taskindex].status = self.status
-        if self.duration != None:
-            seq.tasks[self.taskindex].actualDuration = \
-                "{0}".format(datetime.timedelta(seconds=self.duration))
-            for key, val in self.hostparams.items():
-                seq.host.add_param(key, val)
-        if options.list:
-            log.debug("Writing results of listing to %s%s" % (options.getSysStatusName(), constants.LISTFILE_SUFFIX))
-            wfsys.write("%s%s" %(options.getSysStatusName(), constants.LISTFILE_SUFFIX))
-        else:
-            wfsys.write(options.getSysStatusName())
-
+                    reclog.callHandlers(record)
+            except Queue.Empty:
+                queueempty = True
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except EOFError:
+                break
+            except:
+                traceback.print_exc(file=sys.stderr)

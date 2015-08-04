@@ -4,7 +4,7 @@
 from lxml import etree
 
 import logging
-import constants
+from wfeng import constants
 
 LOG = logging.getLogger(__name__)
 

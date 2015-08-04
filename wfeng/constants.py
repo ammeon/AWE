@@ -17,7 +17,7 @@ INFONOTIME = 21
 ERRORNOTIME = 41
 
 #locations
-WFENG_ROOT = os.path.abspath(os.path.join(__file__, '../../..'))
+WFENG_ROOT = os.environ["AWE_HOME"]
 WORKFLOW_XSD = "{0}/xsd/workflow.xsd".format(WFENG_ROOT)
 HOSTS_XSD = "{0}/xsd/hosts.xsd".format(WFENG_ROOT)
 VERSION_FILE = "{0}/RELEASE_INFO.txt".format(WFENG_ROOT)
@@ -44,6 +44,42 @@ MANUAL_FIX = "MANUAL_FIX"
 
 SUCCESS_STATUSES = [SUCCESS, REACHED_VERSION, MANUAL_FIX, PARAM_NOTMATCH]
 
+# dynamic pause and escape types
+DYNAMIC_ESCAPE = "ESCAPE"
+DYNAMIC_PAUSE = "PAUSE"
+DYNAMIC_ADD = "add"
+DYNAMIC_REMOVE = "remove"
+# position (relative to reference task id) for insertion of dynamic pause/esc
+DYNAMIC_BEFORE = "before"
+DYNAMIC_AFTER = "after"
+# dynamic pause and escape fields
+DYN_ACTION = "action"
+DYN_TYPE = "dyntype"
+DYN_POS = "pos"
+DYN_REFID = "refid"
+DYN_ID = "id"
+DYN_MSG = "msg"
+DYN_HOSTS = "hosts"
+DYN_SERVER = "server"
+DYN_DEP = "dep"
+DYN_DEPSINGLE = "depsingle"
+DYN_SWVER = "swver"
+DYN_OSVER = "osver"
+DYN_CHECKPARAMS = "checkparams"
+# the following two vars flag whether a field is required or optional
+FIELD_REQUIRED = True
+FIELD_OPTIONAL = False
+
+dynamicDefaults = {
+    DYN_HOSTS: '*',
+    DYN_SERVER: '*',
+    DYN_DEP: None,
+    DYN_DEPSINGLE: False,
+    DYN_SWVER: None,
+    DYN_OSVER: None,
+    DYN_CHECKPARAMS: None
+}
+
 #Running states
 RUNNING = "RUNNING"
 COMPLETED = "COMPLETED"
@@ -68,7 +104,12 @@ ERROR_INFO = 2
 LISTFILE_SUFFIX = ".list"
 
 # Vars that cannot be set in ini file
-INI_RESERVED_VARS = ["SERVERNAME", "SERVERTYPE", "SERVERIP", "SWVERSION", "OSVERSION"]
+INI_RESERVED_VARS = ["SERVERNAME", "SERVERTYPE", \
+                     "SERVERIP", "SWVERSION", "OSVERSION"]
+
+# used in the dict returned by getTaskIndices
+TASK_IN_GROUP = "group"
+TASK_LIST = "tasklist"
 
 
 class Colours:

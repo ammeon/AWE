@@ -1,10 +1,11 @@
 """ Holds utility functions
 @copyright: Ammeon Ltd
 """
-import constants
+from wfeng import constants
 import threading
 import time
 import re
+import os
 
 INFO_FORMAT = "  -->{0}{1}{4}: {2} {3}\n"
 ERR_FORMAT = "  -->{0}{1}{4}: {5}{2}{6} {3}\n"
@@ -19,6 +20,25 @@ def get_boolean(child, attributename):
     else:
         attvalue = False
     return attvalue
+
+
+def get_stringtoboolean(strIn):
+    """ converts a string to a boolean
+        Arguments:
+            strIn: the string for conversion
+        Returns:
+            False if value is None or lowercase of strIn is "false,
+            True if lowercase of strIn is "true", else None
+    """
+    if strIn is None:
+        return False
+    lcase = strIn.lower()
+    if lcase == "true":
+        return True
+    elif lcase == "false":
+        return False
+    else:
+        return None
 
 
 def populate_boolean(element, value, attributename):
@@ -39,7 +59,7 @@ def populate_optional(element, value, attributename):
 def populate_dictionary(element, valuedict, attributename):
     """ Writes contents of dictionary as comma separated key=value string"""
     attval = ""
-    if valuedict!=None:
+    if valuedict != None:
         for key, value in valuedict.iteritems():
             commaval = ""
             if len(attval) != 0:
@@ -125,7 +145,7 @@ def is_number(str_val):
             Returns:
                 True if number
     """
-    regexp="^[0-9][\.0-9]*$"
+    regexp = "^[0-9][\.0-9]*$"
     if re.match(regexp, str_val):
         return True
     else:
@@ -335,20 +355,69 @@ def get_file_less_ext(full_filename):
 
 
 def extractIniParam(iniparams, inStr):
-    """ if msg starts with $ then we return matching param from the ini params, otherwise return task.msg
+    """ if inStr starts with $ then we return matching param from the ini
+        params, otherwise return taskval
         Params:
         iniparams - the map of parameters derived from the ini file
         inStr - input string
     """
-    taskmsg=inStr
+    taskval = inStr
     if inStr.startswith('$'):
         #find the param
-        # note that this has been pre-validated, so we should not ever actually fail to find the key
-        param=inStr[1:]
+        # note that this has been pre-validated, so we should not ever
+        # actually fail to find the key
+        param = inStr[1:]
         if param in iniparams:
-            taskmsg=iniparams[param]
-            if taskmsg == "":
-                taskmsg=None
-    return taskmsg
+            taskval = iniparams[param]
+            if taskval == "":
+                taskval = None
+    return taskval
 
 
+def getHostsThatApply(task, hosts, log):
+    """ Returns list of hosts that this task applies to from those
+        available """
+    hostList = []
+    if task.servertype not in hosts.hosts:
+        # If its optional - just skip it, else raise error
+        if task.optional:
+            log.debug("Skipping %s as no server of type %s" %
+                              (task.name, task.servertype))
+            return hostList
+        else:
+            raise ValueError(
+                   'Missing mandatory server %s in hosts file' % \
+                   task.servertype)
+    taskhosts = hosts.hosts[task.servertype]
+    if task.hosts == constants.ALL:
+        for y in taskhosts:
+            hostList.append(y)
+    else:
+        notNum = False
+        serverNum = task.hosts
+        if task.hosts.startswith("!"):
+            # hosts is format !1 to indicate all but first etc
+            notNum = True
+            serverNum = task.hosts[1:]
+        if serverNum == "$":
+            # $ indicates last host, so work out last host
+            # Want all but last
+            serverNum = len(taskhosts)
+        else:
+            serverNum = int(serverNum)
+        if notNum:
+            for i in range(len(taskhosts)):
+                if (i + 1) != serverNum:
+                    hostList.append(taskhosts[i])
+        else:
+            hostList.append(taskhosts[serverNum - 1])
+    return hostList
+
+
+def outputTitleLines(line, err_msg, term_size, hyphen_line):
+        """ Clears page and outputs line in center with hyphens underneath"""
+        os.system('clear')
+        print line.center(term_size)
+        print hyphen_line[:len(line)].center(term_size)
+        print err_msg
+        print ""

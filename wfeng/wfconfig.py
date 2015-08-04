@@ -3,7 +3,7 @@
 """
 import os
 import logging
-import constants
+from wfeng import constants
 
 
 # Special output strings so that scripts can summarise error to display

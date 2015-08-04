@@ -9,6 +9,7 @@ The tasks to be performed on a deployment are broken down into steps and the dep
 For further information on AWE, please see the AWE Overview at http://www.ammeon.com/service/service-upgrade-orchestration-with-ammeon-workflow-engine/ or contact awe-support@ammeon.com.
 
 
+
 Dependencies
 ============
 AWE has been tested on Python 2.6, and requires the following libraries. In brackets are the versions that it has been verified against (however it may be compatible with other versions):
@@ -20,18 +21,21 @@ AWE has been tested on Python 2.6, and requires the following libraries. In brac
 5. ecdsa (0.11)
 6. ctypes (1.1.0)
 7. argparse (1.3.0)
-
+8. setuptools (3.4.4)
 
 Install AWE
 ===========
+1. AWE runs on both Solaris and Linux, and the install.sh script provided will work on both.
+2. AWE works from a AWE_HOME directory, so prior to beginning the installation set AWE_HOME environment variable to point to the location that you wish AWE to be installed to.  AWE will create a cfg, xsd, log, license, etc directories for input files and logs.  The wfeng package that comprises AWE, will be deployed to the lib/wfeng directory under AWE.  If a different directory structure is required then python setup.py install can be used instead.
+3. Default installation steps:
 
-1. AWE runs on both Solaris and Linux, however the install scripts provided will only work on Solaris.
-2. AWE works from a AWE_HOME directory, so prior to beginning the installation set AWE_HOME environment variable to point to the location that you wish AWE to be installed to.  AWE will create a cfg, xsd, log, license, etc directories for input files and logs. The wfeng package that comprises AWE, will be deployed to the lib/wfeng directory under AWE.
-3. If you wish AWE to be run by a different user to root, then set AWE_USER to the user to be run from.
-4. Run bash install.sh to install AWE
-5. Set an alias wfeng to point to <AWE_HOME>/lib/workfloweng.py if the install hasn't set one up for you
-6. Test the install with: wfeng -h
-7. The install will contain an example workflow and hosts file.
+  a) set AWE_HOME to directory which to install AWE to
+  b) set AWE_USER to the user that should own the AWE directories.
+  c) Run 'install.sh' to install the AWE software. install.sh will install the AWE software, and set a wfeng alias in the user's profile
+
+4. Set an alias wfeng to point to <AWE_HOME>/lib/workfloweng.py if the install hasn't set one up for you
+5. Test the install with: wfeng -h
+
 
 AWE directory structure
 =======================

@@ -2,13 +2,13 @@
     not contain host specific information and is the generic workflow
 @copyright: Ammeon Ltd
 """
-from task import FabricTaskManager, GroupTask
-from task import TagTask, ParallelTask
-from msgtask import EscapeTask, PauseTask, NoticeTask
-from workflowsys import WorkflowSystem
-import constants
+from wfeng.task import FabricTaskManager, GroupTask
+from wfeng.task import TagTask, ParallelTask
+from wfeng.msgtask import EscapeTask, PauseTask, NoticeTask
+from wfeng.workflowsys import WorkflowSystem
+from wfeng import constants
 from lxml import etree
-import utils
+from wfeng import utils
 
 import logging
 
@@ -31,6 +31,9 @@ class Workflow:
         self.config = config
         self.taskmgr = FabricTaskManager()
         self.name = ""
+        # we will check params in ini file unless explicitly flagged not
+        # to do so
+        #self.checkIniParams = True
 
     def _parsePhase(self, phase, element):
         """Parses a phase of workflow, with task items
@@ -50,18 +53,23 @@ class Workflow:
                 for ctask in child.iterchildren(tag=etree.Element):
                     if ctask.tag == "task":
                         task = self._parseTask(ctask, phasename)
-                        if task is None:
-                            return False
-                        if task.servertype == "*":
-                            log.error("Servertype of * is not supported " + \
-                                      "within group {0}".format(gid))
-                            return False
-                        if not group.append(task):
-                            return False
+                    elif ctask.tag == "escape" or ctask.tag == "pause" or \
+                         ctask.tag == "notice":
+                        task = self._parseMsgTask(ctask, phasename)
                     else:
                         log.error("Unexpected tag {0} within group set".\
-format(ctask.tag))
+                            format(ctask.tag))
                         return False
+
+                    if task is None:
+                        return False
+                    if task.servertype == "*":
+                        log.error("Servertype of * is not supported " + \
+                                  "within group {0}".format(gid))
+                        return False
+                    if not group.append(task):
+                        return False
+
             elif child.tag == "parallel":
                 parallel = ParallelTask(child.attrib["id"], self.config)
                 phase.append(parallel)
@@ -78,7 +86,7 @@ format(ctask.tag))
                                 return False
                     else:
                         log.error("Unexpected tag {0} within parallel set".\
-format(ctask.tag))
+                                   format(ctask.tag))
                         return False
             elif child.tag == "task":
                 task = self._parseTask(child, phasename)
@@ -141,19 +149,26 @@ format(ctask.tag))
                 return None
         depsinglehost = utils.get_boolean(child, "depsinglehost")
         optional = utils.get_boolean(child, "optional")
+        dynamic = utils.get_boolean(child, "dynamic")
         server = child.attrib["server"]
         swversion = child.get("swversion")
         if swversion is not None and self._hasMissingIniParam(swversion):
-            log.debug("swversion %s contains parameters that are not present in the ini file" % swversion)
+            log.debug("swversion " \
+              "%s contains parameters that are not present in the ini file" % \
+              swversion)
             return None
         osversion = child.get("osversion")
         if osversion is not None and self._hasMissingIniParam(osversion):
-            log.debug("osversion %s contains parameters that are not present in the ini file" % osversion)
+            log.debug("osversion " \
+              "%s contains parameters that are not present in the ini file" % \
+              osversion)
             return None
         checkparams = utils.get_dictionary(child, "checkparams")
-        msgVal=child.get("msg")
+        gid = child.get("gid")
+        msgVal = child.get("msg")
         if msgVal is not None and self._hasMissingIniParam(msgVal):
-            log.debug("%s msg element %s contains parameters that are not present in the ini file" % (task_type, msgVal))
+            log.debug(("%s msg element %s contains parameters that are not " \
+                       "present in the ini file") % (task_type, msgVal))
             return None
         if task_type == "escape":
             task = EscapeTask(child.attrib["id"], self.config,
@@ -161,24 +176,30 @@ format(ctask.tag))
                               child.attrib["hosts"],
                               server, swversion, osversion,
                               dependency, optional,
-                              depsinglehost, checkparams)
+                              depsinglehost, checkparams,
+                              gid, dynamic)
         elif task_type == "pause":
             task = PauseTask(child.attrib["id"], self.config,
                              child.attrib["msg"],
                              child.attrib["hosts"],
                              server, swversion, osversion,
                              dependency, optional,
-                             depsinglehost, checkparams)
+                             depsinglehost, checkparams,
+                             gid, dynamic)
         elif task_type == "notice":
             task = NoticeTask(child.attrib["id"], self.config,
                               child.attrib["msg"],
                               child.attrib["hosts"],
                               server, swversion, osversion,
                               dependency, optional,
-                              depsinglehost, checkparams)
+                              depsinglehost, checkparams,
+                              gid)
         else:
             log.debug("Task type %s is not a valid task type" % task_type)
         return task
+
+    #def setCheckIniParams(self, check):
+    #    self.checkIniParams = check
 
     def parse(self, filename):
         """Parses workflow filename to produce list of tasks
@@ -323,19 +344,24 @@ format(ctask.tag))
         return True
 
     def _hasMissingIniParam(self, strng):
-        """ validates that any parameters in the supplied string are found in the ini file parameters
+        """ validates that any parameters in the supplied string are found
+            in the ini file parameters
             Arguments:
                 strng: supplied string which may contain $-prefixed parameters
             Returns:
-                False if there are no unmatched params, True if there are params in the string which are not found in the ini file params
+                False if there are no unmatched params, True if there are
+                params in the string which are not found in the ini file params
         """
         if "$" in strng:
-            # check it is in the iniparams and if not then return True to indicate that param is missing from ini file
+            # check it is in the iniparams and if not then return True to
+            # indicate that param is missing from ini file
             for word in strng.split():
                 if word.startswith("$"):
-                    param=word[1:]
-                    if not param in constants.INI_RESERVED_VARS and not param in self.config.iniparams:
-                        log.error("ini parameter %s is used in workflow but is not found in ini file" % word)
+                    param = word[1:]
+                    if not param in constants.INI_RESERVED_VARS and \
+                       not param in self.config.iniparams:
+                        log.error(("ini parameter %s is used in workflow " \
+                                   "but is not found in ini file") % word)
                         return True
         return False
 
@@ -350,7 +376,8 @@ format(ctask.tag))
         cmd = child.get("cmd")
         #if cmd is present then we need to check that any parameters are valid
         if cmd is not None and self._hasMissingIniParam(cmd):
-                log.debug("cmd %s contains parameters that are not present in the ini file" % cmd)
+                log.debug(("cmd %s contains parameters that are not " \
+                          "present in the ini file") % cmd)
                 return None
 
         id = child.get("id")
@@ -359,7 +386,8 @@ format(ctask.tag))
         optional = utils.get_boolean(child, "optional")
         duration = child.get("estimatedDur")
         if duration is not None and self._hasMissingIniParam(duration):
-                log.debug("duration %s contains parameters that are not present in the ini file" % duration)
+                log.debug(("duration %s contains parameters that are not " \
+                          "present in the ini file") % duration)
                 return None
         dependency = child.get("dependency")
         depsinglehost = utils.get_boolean(child, "depsinglehost")
@@ -372,11 +400,13 @@ format(ctask.tag))
                 return None
         swversion = child.get("swversion")
         if swversion is not None and self._hasMissingIniParam(swversion):
-            log.debug("swversion %s contains parameters that are not present in the ini file" % swversion)
+            log.debug(("swversion %s contains parameters that are not " \
+                      "present in the ini file") % swversion)
             return None
         osversion = child.get("osversion")
         if osversion is not None and self._hasMissingIniParam(osversion):
-            log.debug("osversion %s contains parameters that are not present in the ini file" % osversion)
+            log.debug(("osversion %s contains parameters that are not " \
+                      "present in the ini file") % osversion)
             return None
         checkparams = utils.get_dictionary(child, "checkparams")
         if phasename == constants.EXECUTE:
@@ -390,6 +420,61 @@ format(ctask.tag))
                                            run_local, depsinglehost,
                                            checkparams)
         return task
+
+    def _parseMsgTask(self, child, phasename):
+        """ Parses a child element that is a message task.
+            Arguments:
+                child: Child element
+                phasename: Name of phase parsing
+            Returns:
+                MsgTask instance
+        """
+
+        id = child.get("id")
+        msg = child.get("msg")
+        hosts = child.get("hosts")
+        server = child.get("server")
+        optional = utils.get_boolean(child, "optional")
+        dependency = child.get("dependency")
+        depsinglehost = utils.get_boolean(child, "depsinglehost")
+        if dependency != None:
+            if not self._checkValidDependency(dependency):
+                log.error("Dependency {0} for task {1} is invalid".\
+                        format(dependency, id))
+                return None
+        swversion = child.get("swversion")
+        if swversion is not None and self._hasMissingIniParam(swversion):
+            log.debug("swversion %s contains parameters that are not "
+                      "present in the ini file" % swversion)
+            return None
+        osversion = child.get("osversion")
+        gid = child.get("gid")
+        if osversion is not None and self._hasMissingIniParam(osversion):
+            log.debug("osversion %s contains parameters that are not "
+                      "present in the ini file" % osversion)
+            return None
+        checkparams = utils.get_dictionary(child, "checkparams")
+        if child.tag == "escape":
+            msgtask = EscapeTask(id, self.config, msg, hosts, server,
+                                           swversion, osversion,
+                                           dependency, optional,
+                                           depsinglehost, checkparams, gid)
+        elif child.tag == "pause":
+            msgtask = PauseTask(id, self.config, msg, hosts, server,
+                                           swversion, osversion,
+                                           dependency, optional,
+                                           depsinglehost, checkparams, gid)
+        elif child.tag == "notice":
+            msgtask = NoticeTask(id, self.config, msg, hosts, server,
+                                           swversion, osversion,
+                                           dependency, optional,
+                                           depsinglehost, checkparams, gid)
+        else:
+            log.error("Task tag type {0} for task {1} is invalid".\
+                        format(child.tag, id))
+            return None
+
+        return msgtask
 
     def _getHostsThatApply(self, task, hosts):
         """ Returns list of hosts that this task applies to from those

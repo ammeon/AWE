@@ -3,8 +3,8 @@
 """
 import logging
 import os
-import constants
-import wfconfig
+from wfeng import constants
+from wfeng import wfconfig
 import sys
 import utils
 
@@ -80,6 +80,443 @@ class InputMgr(object):
         return val
 
 
+class DynamicMenuMgr(object):
+    """ Class that provides interactive menu driven processing for dynamic
+        escape and dynamic pause """
+
+    def __init__(self, term_size, config, hosts, validator):
+        self.term_size = term_size
+        self.config = config
+        self.hosts = hosts
+        self.validator = validator
+
+    def getDynamicAlteration(self, wfsys, msgs):
+        """ interactively obtains the details for the dynamic pause/esc
+            alteration
+            Arguments:
+                wfsys: the workflow
+                msgs: list to hold messages to be displayed to user
+            Returns:
+                dictionary containing the alteration details - empty if
+                errors encountered, None if quitting
+        """
+        if not len(msgs) == 0:
+            LOG.info("\n\n\n")
+            for m in msgs:
+                LOG.info(m)
+            choice = raw_input(
+                  "\nPress enter to continue\n")
+            msgs = []
+
+        utils.outputTitleLines("WORKFLOW ENGINE DYNAMIC ALTERATIONS", "",
+                               self.term_size, HYPHEN_LINE)
+
+        print " [1] Enter new dynamic ESCAPE task"
+        print " [2] Enter new dynamic PAUSE task"
+        print " [3] Delete existing dynamic ESCAPE task"
+        print " [4] Delete existing dynamic PAUSE task"
+        choice = raw_input(
+            "\nPlease select your option or q to quit:\n")
+
+        if choice == "q":
+            return None
+        if not utils.digit_in_range(choice, 4):
+            msgs.append("Invalid option {0}".format(choice))
+            return {}
+
+        val = int(choice)
+        dtask = {}
+
+        if val == 1:
+            return self.getDynamicAddition(dtask, constants.DYNAMIC_ESCAPE,
+                                           wfsys)
+        elif val == 2:
+            return self.getDynamicAddition(dtask, constants.DYNAMIC_PAUSE,
+                                           wfsys)
+        elif val == 3:
+            return self.getDynamicRemoval(dtask, constants.DYNAMIC_ESCAPE,
+                                           wfsys)
+        elif val == 4:
+            return self.getDynamicRemoval(dtask, constants.DYNAMIC_PAUSE,
+                                           wfsys)
+        else:
+            LOG.debug("Option out of range - this should never happen as "
+                      "should be protected by range test")
+            return {}
+
+    def getDynamicAddition(self, resDict, dyntype, wfsys):
+        """ interactively obtains the details for the dynamic pause/esc
+            addition
+            Arguments:
+                resdict: a dictionary to hold the addition details
+                dyntype: specifies whether this is a pause or an escape
+                wfsys: workflow sys object used in validation
+            Returns:
+                dictionary containing the alteration details - empty if
+                errors encountered or if quitting
+        """
+        utils.outputTitleLines(
+           "WORKFLOW ENGINE DYNAMIC ALTERATIONS - add %s task" % dyntype,
+           "Enter task details, or type q into any field to quit back to menu",
+                self.term_size, HYPHEN_LINE)
+        resDict[constants.DYN_ACTION] = constants.DYNAMIC_ADD
+        resDict[constants.DYN_TYPE] = dyntype
+        while True:
+
+            if not self.dynAddField(resDict, constants.DYN_ID,
+                   "Enter %s task id" % dyntype, dyntype, wfsys):
+                return {}
+
+            if not self.dynAddField(resDict, constants.DYN_REFID,
+                   "Enter reference id (task before/after which new "
+                    "task will appear)", dyntype, wfsys):
+                return {}
+
+            if not self.dynAddField(resDict, constants.DYN_POS,
+                   "Enter [before] to insert before ref task, or "
+                     "[after] to insert after", dyntype, wfsys):
+                return {}
+
+            if not self.dynAddField(resDict, constants.DYN_MSG,
+                   "msg", dyntype, wfsys):
+                return {}
+
+            if not self.dynAddHostAndServer(resDict, dyntype, wfsys):
+                return {}
+
+            if not self.dynAddField(resDict, constants.DYN_DEP,
+                   "dependency", dyntype, wfsys):
+                return {}
+
+            if not self.dynAddField(resDict, constants.DYN_DEPSINGLE,
+                   "depsingle", dyntype, wfsys):
+                return {}
+
+            if not self.dynAddField(resDict, constants.DYN_SWVER,
+                   "swversion", dyntype, wfsys):
+                return {}
+
+            if not self.dynAddField(resDict, constants.DYN_OSVER,
+                   "osversion", dyntype, wfsys):
+                return {}
+
+            if not self.dynAddField(resDict, constants.DYN_CHECKPARAMS,
+                   "checkparams", dyntype, wfsys):
+                return {}
+
+            LOG.info(self.getDetails(resDict, dyntype))
+
+            choice = ""
+            while not choice == "q" and not choice == "y" and \
+                       not choice == "a":
+                choice = raw_input(
+                  "\nPlease select y to insert %s task, a to amend entries, "
+                     "or q to quit back to the main menu without inserting "
+                     "the task:\n" % \
+                       dyntype)
+                if choice == "q":
+                    LOG.debug("Quitting back to menu")
+                    return {}
+                if choice == "y":
+                    LOG.debug("Dynamic addition ready for action")
+                    return resDict
+                if choice == "a":
+                    LOG.debug("Amending dynamic addition entries")
+
+    def getDynamicRemoval(self, resDict, dyntype, wfsys):
+        """ interactively obtains the details for the dynamic pause/esc removal
+            Arguments:
+                resdict: a dictionary to hold the addition details
+                dyntype: specifies whether this is a pause or an escape
+                wfsys: workflow sys object used in validation
+            Returns:
+                dictionary containing the alteration details - empty if errors
+                encountered or if quitting
+        """
+        utils.outputTitleLines(
+           "WORKFLOW ENGINE DYNAMIC ALTERATIONS - remove %s task" % dyntype,
+           "Enter task details, or type q into any field to quit back to menu",
+             self.term_size, HYPHEN_LINE)
+        resDict[constants.DYN_ACTION] = constants.DYNAMIC_REMOVE
+        resDict[constants.DYN_TYPE] = dyntype
+
+        while True:
+            if not self.acceptExistingEntry(resDict, constants.DYN_ID):
+                entryOK = False
+                while not entryOK:
+                    entryOK = True
+                    localMsgs = []
+                    if not self.getRawInput(resDict, constants.DYN_ID,
+                           "Enter %s task id" % dyntype, None):
+                        return {}
+                    LOG.debug("Field %s entered as %s" % \
+                               (constants.DYN_ID, resDict[constants.DYN_ID]))
+                    if not self.validator.validExecuteTaskId(\
+                                resDict[constants.DYN_ID], dyntype,
+                                                    wfsys, localMsgs):
+                        self.displayErrors(localMsgs)
+                        entryOK = False
+                    elif self.validator.hasDependents(\
+                                   resDict[constants.DYN_ID], wfsys,
+                                     localMsgs):
+                        self.displayErrors(localMsgs)
+                        entryOK = False
+            choice = ""
+            while not choice == "q" and not choice == "y" and \
+                                                 not choice == "a":
+                choice = raw_input(
+                   "\nPlease select y to remove %s task, a to amend entry, "
+                       "or q to quit back to the main menu without removing "
+                     "the task:\n" % \
+                       dyntype)
+                if choice == "q":
+                    LOG.debug("Quitting back to menu")
+                    return {}
+                if choice == "y":
+                    LOG.debug("Dynamic removal ready for action")
+                    return resDict
+
+    def getRawInput(self, resDict, key, inputprompt, defaulter):
+        promptStr = "\n%s: " % inputprompt
+        choice = raw_input(promptStr).rstrip()
+        if choice == "q":
+            return False
+        else:
+            if choice == "":
+                resDict[key] = defaulter
+            else:
+                resDict[key] = choice
+
+        return True
+
+    def acceptExistingEntry(self, resDict, entryKey):
+        """ allows us to accept existing entry on an edit
+        Arguments:
+            resDict: the dictionary containing entries so far
+            entryKey: the key of the existing entry to offer
+        Returns:
+            True if user accepts the entry
+            False if the user rejects the entry
+            False if there is no existing entry
+        """
+        try:
+            val = resDict[entryKey]
+        except KeyError:
+            return False
+        cont = True
+        retval = True
+        while cont:
+            promptStr = "\nExisting [%s] entry: [%s]  Accept? y/n: " % \
+                               (entryKey, val)
+            choice = raw_input(promptStr)
+            if choice.lower() == "y":
+                cont = False
+            elif choice.lower() == "n":
+                cont = False
+                retval = False
+        return retval
+
+    def dynAddHostAndServer(self, resDict, dyntype, wfsys):
+        """handles input of host and server, for which values are co-dependent
+           Arguments:
+               resDict: the dictionary of entered fields being built
+               dyntype: type of msgTask (pause or escape)
+               wfsys: the current workflow - used in validation
+           Returns:
+               True if field value entered, or empty dict if getRawInput
+               returned False (which indicates that a quit (q) was entered)
+        """
+        entriesOK = False
+        while not entriesOK:
+            entriesOK = True
+            localMsgs = []
+            LOG.info("\nEnter hosts and server types fields:")
+            if not self.dynAddField(resDict, constants.DYN_HOSTS,
+                                           "hosts", dyntype, wfsys):
+                return {}
+
+            if not self.dynAddField(resDict, constants.DYN_SERVER,
+                                           "server", dyntype, wfsys):
+                return {}
+
+            if not self.validator.validHostsServer(\
+                   resDict[constants.DYN_HOSTS], resDict[constants.DYN_SERVER],
+                   resDict[constants.DYN_REFID], wfsys, self.hosts, localMsgs):
+                self.displayErrors(localMsgs)
+                entriesOK = False
+
+        return True
+
+    def dynAddField(self, resDict, fieldKey, fieldPrompt, dyntype, wfsys):
+        """handles input of a single field, offering edit of existing value
+           if present
+           Note that for hosts and server the validation here is only for
+           free text - further validation is applied in dynAddHostAndServer
+           Arguments:
+               resDict: the dictionary of entered fields being built
+               fieldKey: the key of the current entry
+               fieldPrompt: the prompt for this field
+               dyntype: type of msgTask (pause or escape)
+               wfsys: the current workflow - used in validation
+           Returns:
+               True if field value entered, False if getRawInput returned False
+                    (which indicates that a quit (q) was entered), or
+                     the field was unrecognise (which should never happen)
+        """
+        if not self.acceptExistingEntry(resDict, fieldKey):
+            entryOK = False
+            while not entryOK:
+                entryOK = True
+                localMsgs = []
+                if not self.getRawInput(resDict, fieldKey,
+                           fieldPrompt, None):
+                    return False
+                LOG.debug("Field %s entered as %s" % \
+                               (fieldKey, resDict[fieldKey]))
+                if fieldKey == constants.DYN_ID:
+                    if not self.validator.validUniqueTaskId(\
+                                resDict[fieldKey], wfsys, localMsgs):
+                        self.displayErrors(localMsgs)
+                        entryOK = False
+                elif fieldKey == constants.DYN_REFID:
+                    if not self.validator.validRefId(\
+                                  resDict[constants.DYN_REFID],
+                                  wfsys, localMsgs):
+                        self.displayErrors(localMsgs)
+                        entryOK = False
+                elif fieldKey == constants.DYN_POS:
+                    if resDict[constants.DYN_POS] is not None:
+                        if resDict[constants.DYN_POS].lower() == "before":
+                            resDict[constants.DYN_POS] = \
+                                             constants.DYNAMIC_BEFORE
+                        elif resDict[constants.DYN_POS].lower() == "after":
+                            resDict[constants.DYN_POS] = \
+                                             constants.DYNAMIC_AFTER
+                        else:
+                            resDict[constants.DYN_POS] == None
+                    if not self.validator.validPosition(\
+                                  resDict[constants.DYN_POS],
+                                  localMsgs):
+                        self.displayErrors(localMsgs)
+                        entryOK = False
+                elif fieldKey == constants.DYN_MSG:
+                    if not self.validator.validFreeTextLine(\
+                                         resDict[constants.DYN_MSG],
+                                         constants.FIELD_REQUIRED, localMsgs):
+                        self.displayErrors(localMsgs)
+                        entryOK = False
+                    if not self.validator.validIniParam(\
+                                 resDict[constants.DYN_MSG], wfsys, localMsgs):
+                        self.displayErrors(localMsgs)
+                        entryOK = False
+                elif fieldKey == constants.DYN_HOSTS:
+                    if not self.validator.validFreeTextLine(\
+                            resDict[fieldKey],
+                            constants.FIELD_REQUIRED, localMsgs):
+                        self.displayErrors(localMsgs)
+                        entryOK = False
+                    if not self.validator.validHostsFormat(\
+                             resDict[constants.DYN_HOSTS], localMsgs):
+                        self.displayErrors(localMsgs)
+                        entryOK = False
+                elif fieldKey == constants.DYN_SERVER:
+                    if not self.validator.validFreeTextLine(\
+                            resDict[fieldKey],
+                            constants.FIELD_REQUIRED, localMsgs):
+                        self.displayErrors(localMsgs)
+                        entryOK = False
+                elif fieldKey == constants.DYN_DEP:
+                    if not self.validator.validDependencies(\
+                                    resDict[constants.DYN_DEP], wfsys,
+                                    resDict[constants.DYN_REFID],
+                                    resDict[constants.DYN_POS], localMsgs):
+                        self.displayErrors(localMsgs)
+                        entryOK = False
+                elif fieldKey == constants.DYN_DEPSINGLE:
+                    if not self.validator.validBooleanField(\
+                                          resDict[constants.DYN_DEPSINGLE],
+                                          constants.FIELD_OPTIONAL, localMsgs):
+                        self.displayErrors(localMsgs)
+                        entryOK = False
+                    if not self.validator.validGroupDepSingle(\
+                                   resDict[constants.DYN_DEPSINGLE],
+                                   resDict[constants.DYN_REFID],
+                                   resDict[constants.DYN_DEP], wfsys,
+                                   localMsgs):
+                        self.displayErrors(localMsgs)
+                        entryOK = False
+                elif fieldKey == constants.DYN_SWVER or \
+                     fieldKey == constants.DYN_OSVER:
+                    if not self.validator.validFreeTextLine(\
+                                resDict[fieldKey],
+                                constants.FIELD_OPTIONAL, localMsgs):
+                        self.displayErrors(localMsgs)
+                        entryOK = False
+                    if not self.validator.validIniParam(\
+                                    resDict[fieldKey], wfsys,
+                                    localMsgs):
+                        self.displayErrors(localMsgs)
+                        entryOK = False
+                elif fieldKey == constants.DYN_CHECKPARAMS:
+                    if not self.validator.validCheckparams(\
+                                        resDict[constants.DYN_CHECKPARAMS],
+                                        localMsgs):
+                        self.displayErrors(localMsgs)
+                        entryOK = False
+                    if not self.validator.validIniParam(\
+                                    resDict[constants.DYN_CHECKPARAMS], wfsys,
+                                    localMsgs):
+                        self.displayErrors(localMsgs)
+                        entryOK = False
+                else:
+                        LOG.info("Error: unrecognised field [%s]" % \
+                                          fieldKey)
+                        return False
+        return True
+
+    def displayErrors(self, msgs):
+        """ displays errors from msgs list
+            Arguments:
+                msgs: list of errors
+            Returns:
+                n/a
+        """
+        if len(msgs) == 0:
+            pass
+        else:
+            LOG.info("Error:")
+            for m in msgs:
+                LOG.info(m)
+
+    def getDetails(self, resDict, dyntype):
+        """ formats the new msgTask details as a string for display to user
+            Arguments:
+                reDict: dictionary of the msgTask details entered
+                dyntype: which kind of dynamic task this is (pause or escape)
+            Returns:
+                string representation of the details
+                or None if resDict is None
+        """
+        if resDict is None:
+            return None
+        return "%s: New task will be inserted %s existing task %s\n" \
+                     "%s:[%s] %s:[%s] %s:[%s] %s:[%s] " \
+                     "%s:[%s] %s:[%s] %s:[%s] %s:[%s] %s:[%s]" % \
+                 (dyntype,
+                  resDict[constants.DYN_POS],
+                  resDict[constants.DYN_REFID],
+                  constants.DYN_ID, resDict[constants.DYN_ID],
+                  constants.DYN_MSG, resDict[constants.DYN_MSG],
+                  constants.DYN_HOSTS, resDict[constants.DYN_HOSTS],
+                  constants.DYN_SERVER, resDict[constants.DYN_SERVER],
+                  constants.DYN_DEP, resDict[constants.DYN_DEP],
+                  constants.DYN_DEPSINGLE, resDict[constants.DYN_DEPSINGLE],
+                  constants.DYN_SWVER, resDict[constants.DYN_SWVER],
+                  constants.DYN_OSVER, resDict[constants.DYN_OSVER],
+                  constants.DYN_CHECKPARAMS,
+                  resDict[constants.DYN_CHECKPARAMS])
+
+
 class MenuMgr(object):
     """ Class that provides command line menu and gets input """
 
@@ -95,7 +532,8 @@ class MenuMgr(object):
             Returns:
                 True if ok, False if should quit
         """
-        self._outputTitleLines("WORKFLOW ENGINE", err_msg)
+        utils.outputTitleLines("WORKFLOW ENGINE", err_msg,
+                               self.term_size, HYPHEN_LINE)
         # if we are using the menu then we cannot be using --list
         print " [1] Run display deployment"
         print " [2] Run pre-checks"
@@ -139,23 +577,23 @@ class MenuMgr(object):
 
     def getMenuPhase(self, options, err_msg=""):
         """ Displays sub-menu to determine whether to run phase on
-            all servers, servers of particular type, single server"""
+            all servers, servers of particular type, selected server names"""
         return self.getMenuServers(options,
                                     "{0} phase".format(options.phase),
                                     err_msg)
 
     def getMenuServers(self, options, desc, err_msg=""):
         """ Displays sub-menu to determine whether to run on
-            all servers, servers of particular type, single server.
+            all servers, servers of particular type, selected servernames.
             Used when running phase or tagged set"""
-        self._outputTitleLines("WORKFLOW ENGINE - {0}".format(desc),
-                               err_msg)
+        utils.outputTitleLines("WORKFLOW ENGINE - {0}".format(desc),
+                               err_msg, self.term_size, HYPHEN_LINE)
         # if we are using the menu then we cannot be using --list
         print " [1] Run {0} on all servers".format(desc)
 
-        print " [2] Run {0} on all servers of selected type".format(desc)
+        print " [2] Run {0} on all servers of selected types".format(desc)
 
-        print " [3] Run {0} on single server".format(desc)
+        print " [3] Run {0} on selected servers".format(desc)
         choice = raw_input("\nPlease select your option or q to quit:\n")
         if choice == "q":
             return False
@@ -166,14 +604,14 @@ class MenuMgr(object):
         LOG.debug("Requesting further details for {0}".\
                                format(desc))
         if val == 1:
-            options.servertype = constants.ALL
-            options.servername = constants.ALL
+            options.unparsed_servertypes = constants.ALL
+            options.unparsed_servernames = constants.ALL
         elif val == 2:
-            options.servername = constants.ALL
-            options.servertype = self.getMenuServerType(options)
+            options.unparsed_servernames = constants.ALL
+            options.unparsed_servertypes = self.getMenuServerTypes(options)
         elif val == 3:
-            options.servername = self.getMenuSingleServer(desc)
-            options.servertype = constants.ALL
+            options.unparsed_servernames = self.getMenuSelectedServers(desc)
+            options.unparsed_servertypes = constants.ALL
         if val == 1 or val == 2:
             # Check if want to exclude server
             if options.exclude == None:
@@ -181,35 +619,38 @@ class MenuMgr(object):
                                                          desc)
         return True
 
-    def getMenuServerType(self, options, err_msg=""):
+    def getMenuServerTypes(self, options, err_msg=""):
         """ Display menu for choosing a server type """
         LOG.debug("Getting server type for phase {0}".format(options.phase))
-        self._outputTitleLines("WORKFLOW ENGINE - {0}".format(options.phase),
-                  err_msg)
+        utils.outputTitleLines("WORKFLOW ENGINE - {0}".format(options.phase),
+                  err_msg, self.term_size, HYPHEN_LINE)
         # TODO: Improve by showing them the choice of server types
         # in the workflow
-        choice = raw_input("\nEnter type of server to use\n")
+        choice = raw_input(
+              "\nEnter comma-separated list of server types to use\n")
         return choice
 
-    def getMenuSingleServer(self, info, err_msg=""):
-        """ Display menu for choosing a single server"""
+    def getMenuSelectedServers(self, info, err_msg=""):
+        """ Display menu for choosing servernames"""
         LOG.debug("Getting server name for {0}".format(info))
-        self._outputTitleLines("WORKFLOW ENGINE - {0}".format(info), err_msg)
-        # TODO: Improve by showing them the choice of servers in the workflow
-        name = raw_input("\nEnter name of server to use\n")
+        utils.outputTitleLines("WORKFLOW ENGINE - {0}".format(info),
+                         err_msg, self.term_size, HYPHEN_LINE)
+        name = raw_input(
+               "\nEnter comma-separated list of server names to use\n")
         return name
 
     def getExcludeServers(self, options, info, err_msg=""):
-        """ Display menu for choosing a server type """
+        """ Display menu for choosing excluded servers """
         LOG.debug("Getting exclude servers for {0}".format(info))
-        self._outputTitleLines("WORKFLOW ENGINE - {0}".format(info), err_msg)
+        utils.outputTitleLines("WORKFLOW ENGINE - {0}".format(info),
+                              err_msg, self.term_size, HYPHEN_LINE)
         print "\nEnter servers to exclude as a comma separated list"
         # if we are using the menu then we cannot be using --list
-        if options.servertype == constants.ALL:
+        if options.unparsed_servertypes == constants.ALL:
             choice = raw_input("\nOr hit return to run on all servers: \n")
         else:
             choice = raw_input("\nOr hit return to run on all {0} servers: \n"\
-                                   .format(options.servertype))
+                                   .format(options.unparsed_servertypes))
         if choice == "":
             servers = None
         else:
@@ -219,18 +660,19 @@ class MenuMgr(object):
     def getMenuSingleTask(self, err_msg=""):
         """ Display menu for choosing a single task and server"""
         LOG.debug("Getting task id")
-        self._outputTitleLines("WORKFLOW ENGINE - Select task", err_msg)
+        utils.outputTitleLines("WORKFLOW ENGINE - Select task", err_msg,
+                               self.term_size, HYPHEN_LINE)
         task = raw_input("\nEnter id of task to use\n")
         return task
 
     def getMenuSingleTaskServers(self, options, err_msg=""):
         """ Displays sub-menu to determine whether to run task on
-            all servers, or single server"""
-        self._outputTitleLines("WORKFLOW ENGINE - {0}".format(options.task),
-                               err_msg)
+            all servers, or selected servers"""
+        utils.outputTitleLines("WORKFLOW ENGINE - {0}".format(options.task),
+                               err_msg, self.term_size, HYPHEN_LINE)
         # if we are using the menu then we cannot be using --list
         print " [1] Run {0} on all servers".format(options.task)
-        print " [2] Run {0} on single server".format(options.task)
+        print " [2] Run {0} on selected servers".format(options.task)
         LOG.debug("Requesting further details for {0} task".\
                                                   format(options.task))
         choice = raw_input("\nPlease select your option or q to quit:\n")
@@ -243,15 +685,17 @@ class MenuMgr(object):
         if val == 1:
             if options.exclude == None:
                 options.exclude = self.getExcludeServers(options, options.task)
-            options.servername = constants.ALL
+            options.unparsed_servernames = constants.ALL
             return True
         elif val == 2:
-            options.servername = self.getMenuSingleServer(options.task)
+            options.unparsed_servernames = \
+                             self.getMenuSelectedServers(options.task)
         return True
 
     def getEditMenu(self, options, err_msg=""):
         """ Displays sub-menu to determine what options to edit """
-        self._outputTitleLines("WORKFLOW ENGINE - Edit options", err_msg)
+        utils.outputTitleLines("WORKFLOW ENGINE - Edit options", err_msg,
+                               self.term_size, HYPHEN_LINE)
         print " [1] Configure information tag for phase"
         print " [2] Configure error tag for phase"
         print " [3] Configure arguments in display status information line"
@@ -292,8 +736,9 @@ class MenuMgr(object):
         else:
             tagname = "error"
             paramname = "_ERR"
-        self._outputTitleLines("WORKFLOW ENGINE - Edit {0} tags".\
-                          format(tagname), err_msg)
+        utils.outputTitleLines("WORKFLOW ENGINE - Edit {0} tags".\
+                          format(tagname), err_msg, self.term_size,
+                          HYPHEN_LINE)
         print " [1] Configure display {0} tag".format(tagname)
         print " [2] Configure precheck {0} tag".format(tagname)
         print " [3] Configure execute {0} tag".format(tagname)
@@ -337,8 +782,8 @@ class MenuMgr(object):
     def getEditArguments(self, err_msg=""):
         """ Displays the user the choice of display information tags
             can set """
-        self._outputTitleLines("WORKFLOW ENGINE - Edit status arguments",
-                               err_msg)
+        utils.outputTitleLines("WORKFLOW ENGINE - Edit status arguments",
+                               err_msg, self.term_size, HYPHEN_LINE)
         print " [1] Configure software version tag"
         print " [2] Configure server type tag"
         print " [3] Configure os version tag"
@@ -357,7 +802,8 @@ class MenuMgr(object):
 
     def setTimeout(self, options, err_msg=""):
         """ Displays the menu to get the timeout value"""
-        self._outputTitleLines("WORKFLOW ENGINE - Edit timeout", err_msg)
+        utils.outputTitleLines("WORKFLOW ENGINE - Edit timeout", err_msg,
+                               self.term_size, HYPHEN_LINE)
         choice = raw_input("\nPlease enter timeout (secs) or q to quit\n")
         if choice == "q":
             return False
@@ -367,14 +813,6 @@ class MenuMgr(object):
         val = int(choice)
         options.timeout = val
         return True
-
-    def _outputTitleLines(self, line, err_msg):
-        """ Clears page and outputs line in center with hyphens underneath"""
-        os.system('clear')
-        print line.center(self.term_size)
-        print HYPHEN_LINE[:len(line)].center(self.term_size)
-        print err_msg
-        print ""
 
     def _digitInRange(self, choice, max_val, min_val=1):
         """ Verifies choice is integer in range 1->max """
@@ -391,8 +829,8 @@ class MenuMgr(object):
             Returns:
                 True if entered tag
                 False if want to quit"""
-        self._outputTitleLines("WORKFLOW ENGINE - Select tag",
-                               err_msg)
+        utils.outputTitleLines("WORKFLOW ENGINE - Select tag",
+                               err_msg, self.term_size, HYPHEN_LINE)
         # if we are using the menu then we cannot be using --list
         tag = raw_input("\nEnter tag to run or enter to quit\n")
         if len(tag) == 0:
@@ -406,7 +844,8 @@ class MenuMgr(object):
 
     def setOutputLevel(self, options, err_msg=""):
         """ Displays the menu to get the output level"""
-        self._outputTitleLines("WORKFLOW ENGINE - Set output level", err_msg)
+        utils.outputTitleLines("WORKFLOW ENGINE - Set output level",
+                           err_msg, self.term_size, HYPHEN_LINE)
         print " [0] Quiet (suppress info and error tags)"
         print " [1] Output error tags only"
         print " [2] Output info and error tags"

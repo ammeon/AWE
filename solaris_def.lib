@@ -13,6 +13,7 @@ CHGRP=/usr/bin/chgrp
 CHOWN=/usr/bin/chown
 CLEAR=/usr/bin/clear
 CP=/usr/bin/cp
+CUT=/usr/bin/cut
 DATE=/usr/bin/date
 DF=/usr/bin/df
 DIRNAME=/usr/bin/dirname
