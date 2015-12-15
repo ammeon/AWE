@@ -1,11 +1,12 @@
 """ Holds utility functions
-@copyright: Ammeon Ltd
+    @copyright: Ammeon Ltd
 """
 from wfeng import constants
 import threading
 import time
 import re
 import os
+from csv import reader
 
 INFO_FORMAT = "  -->{0}{1}{4}: {2} {3}\n"
 ERR_FORMAT = "  -->{0}{1}{4}: {5}{2}{6} {3}\n"
@@ -24,7 +25,8 @@ def get_boolean(child, attributename):
 
 def get_stringtoboolean(strIn):
     """ converts a string to a boolean
-        Arguments:
+
+        Args:
             strIn: the string for conversion
         Returns:
             False if value is None or lowercase of strIn is "false,
@@ -85,9 +87,31 @@ def get_dictionary(child, attributename):
     return dictval
 
 
+def split_commas(value):
+    """ Splits a string by commas and return an array of values.
+        It will not split by commas within ", e.g.
+        it will split "abc,def",ghi into an array containing first element
+        of abc,def and a second element of ghi"""
+    retval = []
+    if value != None and len(value) != 0:
+        infile = [value]
+        for str in reader(infile):
+            retval = retval + str
+    return retval
+
+
 def processLineForTags(line, infoprefixes, errprefixes, log, tid, output_level,
                              host_colour):
     """ Checks line for info and err lines, and logs accordingly.
+
+        Args:
+            line: line to process
+            infoprefixes: list of strings that indicate info lines
+            errprefixes: list of strings that indicate error lines
+            log: Logger to log with
+            tid: Task id
+            output_level: level to log at
+            host_colour: Colour to log in if running parallel task
         Returns:
             True: if logged
             False: if not logged
@@ -152,56 +176,16 @@ def is_number(str_val):
         return False
 
 
-def check_version(version_req, current_version, exact_match=True):
-    """ Returns whether host is already at required_version
-        Returns:
-            True if current_version >= version_req
+def is_int(str_val):
+    """ Returns whether str_val is of format <number>*
+            Returns:
+                True if number
     """
-    if current_version == None:
-        return False
-    if version_req == None:
+    regexp = "^[0-9]*$"
+    if re.match(regexp, str_val):
         return True
-    if current_version == version_req:
-        return True
-    # If version is of format num.num then can compare with greater/less
-    # than logic, otherwise cannot compare so will just compare by
-    # exact match only
-    if not is_number(current_version) or \
-       not is_number(version_req):
-        return False
-    # If not matched and want exact_match then return False now
-    if exact_match:
-        return False
-    # Split by .
-    current_vers = current_version.split(".")
-    req_vers = version_req.split(".")
-    # Will loop checking values of each sub-part, so as to cope with
-    # comparing 2.1.1 to 2.2, will loop which ever is shorter
-    num_loops = len(current_vers)
-    if len(req_vers) < num_loops:
-        num_loops = len(req_vers)
-    # Now go through each index
-    for index in range(num_loops):
-        if int(current_vers[index]) < int(req_vers[index]):
-            # Current is less than required, so return False
-            return False
-        elif int(current_vers[index]) > int(req_vers[index]):
-            # Current is greater than required, so return True
-            return True
-        # else we are at same, so need to go onto next index to compare
-    # So so far we are at the same version, but that might mean we have
-    # compared 2.1.1 with 2.1 so still need more checks
-    if len(current_vers) > len(req_vers):
-        # We were same until stopped checking, but current has more
-        # values then required, e.g. 2.1.1 compared to 2.1, so return True
-        return True
-    elif len(req_vers) > len(current_vers):
-        # We were same until stopped checking, but required has more
-        # values then required, e.g. 2.1 compared to 2.1.1, so return False
-        return False
     else:
-        # We must be exact match!
-        return True
+        return False
 
 
 def logSkippedTask(logger, task, hoststr):
@@ -237,6 +221,9 @@ def getStatusCount(status, taskname, log):
     elif status == constants.SKIPPED:
         log.log(constants.TRACE, "Skipped {0}".format(taskname))
         numSkipped = 1
+    elif status == constants.INITIAL:
+        log.log(constants.TRACE, "Initial task {0}".format(taskname))
+        # As its initial - do not update any status values
     else:
         log.log(constants.TRACE,
                 "Unexpected status {0} for {1}".format(status,

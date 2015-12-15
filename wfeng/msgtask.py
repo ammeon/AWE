@@ -45,11 +45,11 @@ class MsgTask(WTask):
             returns if they are the same. It ignores the hosts parameter
             as when this is part of a StatusTask the hosts is irrelevant, as
             it will have been expanded to a Host object
-            Arguments:
+
+            Args:
                 task: Task to compare against
             Returns:
-                True: if same
-                False: if different
+                boolean: True if same, False if different
         """
         if not WTask.equals(self, task):
             return False
@@ -124,7 +124,8 @@ class EscapeTask(MsgTask):
 
     def getStatusTasks(self, host):
         """ Returns a list of StatusTask objects in order to be processed.
-            Arguments:
+
+            Args:
                 host: Host to run on, will be ignored
             Returns:
                 list of StatusTask classes
@@ -137,11 +138,11 @@ class EscapeTask(MsgTask):
             returns if they are the same. It ignores the hosts parameter
             as when this is part of a StatusTask the hosts is irrelevant, as
             it will have been expanded to a Host object
-            Arguments:
+
+            Args:
                 task: Task to compare against
             Returns:
-                True: if same
-                False: if different
+                boolean: True if same, False if different
         """
         if not MsgTask.equals(self, task):
             return False
@@ -158,7 +159,8 @@ class MsgStatusTask(StatusTask):
     """ Represents a generic msg task with status """
     def __init__(self, task, host, status):
         """ Initialises StatusTask
-            Arguments:
+
+            Args:
                 task: MsgTask object
                 status: String with status
         """
@@ -168,11 +170,11 @@ class MsgStatusTask(StatusTask):
     def isEquivalent(self, stask):
         """ Compares this StatusTask with that described by stask, and
             if they are the same ignoring status then they are equivalent
-            Arguments:
+
+            Args:
                 stask: StatusTask to compare against
             Returns:
-                True: if same ignoring status
-                False: if different
+                boolean: True if same ignoring status, False if different
         """
         if not self.task.equals(stask.task):
             log.debug("Task %s didn't match %s" % (self.task.name,
@@ -240,12 +242,27 @@ class MsgStatusTask(StatusTask):
         oskey = self.task.config.cfg[wfconfig.OSVER]
         self.host.params[oskey] = osversion
 
+    def manualFix(self):
+        """
+        sets status to manual fix and then returns completed workflow status
+        """
+        genid = self.getId()
+        log.debug("Manually fixing message task %s" % genid)
+        self.status = constants.MANUAL_FIX
+        status_colour = constants.COLOURS.status[self.status]
+        log.info("%s%s%s TASK %s: %s\n" % \
+                                   (status_colour, self.status,
+                                    constants.COLOURS.END, genid,
+                                    self.task.getCmdHostLogStr(self.host)))
+        return WorkflowStatus(WorkflowStatus.COMPLETE, "")
+
 
 class EscapeStatusTask(MsgStatusTask):
     """ Represents a escape task with status """
     def __init__(self, task, host, status):
         """ Initialises StatusTask
-            Arguments:
+
+            Args:
                 task: MsgTask object
                 status: String with status
         """
@@ -254,11 +271,11 @@ class EscapeStatusTask(MsgStatusTask):
     def isEquivalent(self, stask):
         """ Compares this StatusTask with that described by stask, and
             if they are the same ignoring status then they are equivalent
-            Arguments:
+
+            Args:
                 stask: StatusTask to compare against
             Returns:
-                True: if same ignoring status
-                False: if different
+                boolean: True if same ignoring status, False if different
         """
         if not MsgStatusTask.isEquivalent(self, stask):
             return False
@@ -267,16 +284,19 @@ class EscapeStatusTask(MsgStatusTask):
             return False
         return True
 
-    def run(self, output_func, phasename, wfsys, task,
+    def run(self, output_func, phasename, wfsys, tasklist,
             alwaysRun, options):
         """ Runs a pause task
-            Arguments:
+
+            Args:
                 output_func: Method for writing status to, which takes
-                             arguments, line to write and boolean indicating
-                             if end of line
+                arguments, line to write and boolean indicating
+                if end of line
             Returns:
                 WorkflowStatus
         """
+        if options is not None and  options.fix:
+            return self.manualFix()
 
         self.status = constants.SUCCESS
         # Assuming here that a terminal is 80 characters wide.
@@ -339,7 +359,8 @@ class PauseTask(MsgTask):
 
     def getStatusTasks(self, host):
         """ Returns a list of StatusTask objects in order to be processed.
-            Arguments:
+
+            Args:
                 host: Host to run on, will be ignored
                 status: current status
             Returns:
@@ -353,11 +374,11 @@ class PauseTask(MsgTask):
             returns if they are the same. It ignores the hosts parameter
             as when this is part of a StatusTask the hosts is irrelevant, as
             it will have been expanded to a Host object
-            Arguments:
+
+            Args:
                 task: Task to compare against
             Returns:
-                True: if same
-                False: if different
+                boolean: True if same, False if different
         """
         if not MsgTask.equals(self, task):
             return False
@@ -374,7 +395,8 @@ class PauseStatusTask(MsgStatusTask):
     """ Represents a pause task with status """
     def __init__(self, task, host, status):
         """ Initialises StatusTask
-            Arguments:
+
+            Args:
                 task: PauseTask object
                 status: String with status
         """
@@ -383,11 +405,11 @@ class PauseStatusTask(MsgStatusTask):
     def isEquivalent(self, stask):
         """ Compares this StatusTask with that described by stask, and
             if they are the same ignoring status then they are equivalent
-            Arguments:
+
+            Args:
                 stask: StatusTask to compare against
             Returns:
-                True: if same ignoring status
-                False: if different
+                boolean: True if same ignoring status, False if different
         """
         if not MsgStatusTask.isEquivalent(self, stask):
             return False
@@ -396,18 +418,21 @@ class PauseStatusTask(MsgStatusTask):
             return False
         return True
 
-    def run(self, output_func, phasename, wfsys, task,
+    def run(self, output_func, phasename, wfsys, tasklist,
             alwaysRun, options):
         """ Asks users whether to pause or not
-            Arguments:
+
+            Args:
                 output_func: Method for writing status to, which takes
-                             arguments, line to write and boolean indicating
-                             if end of line
+                arguments, line to write and boolean indicating
+                if end of line
             Returns:
-                True if should continue
-                False if should stop
+                boolean: True if should continue, False if should stop
         """
-        self.status = constants.SUCCESS
+
+        if options is not None and  options.fix:
+            return self.manualFix()
+
         # Assuming here that a terminal is 80 characters wide.
         # This should be changed to match the term_size variable
         # in the workflow engine.
@@ -465,7 +490,8 @@ class NoticeTask(MsgTask):
 
     def getStatusTasks(self, host):
         """ Returns a list of StatusTask objects in order to be processed.
-            Arguments:
+
+            Args:
                 host: Host to run on, will be ignored
                 status: current status
             Returns:
@@ -479,11 +505,11 @@ class NoticeTask(MsgTask):
             returns if they are the same. It ignores the hosts parameter
             as when this is part of a StatusTask the hosts is irrelevant, as
             it will have been expanded to a Host object
-            Arguments:
+
+            Args:
                 task: Task to compare against
             Returns:
-                True: if same
-                False: if different
+                boolean: True if same, False if different
         """
         if not MsgTask.equals(self, task):
             return False
@@ -500,7 +526,8 @@ class NoticeStatusTask(MsgStatusTask):
     """ Represents a notice task with status """
     def __init__(self, task, host, status):
         """ Initialises StatusTask
-            Arguments:
+
+            Args:
                 task: NoticeTask object
                 status: String with status
         """
@@ -509,11 +536,11 @@ class NoticeStatusTask(MsgStatusTask):
     def isEquivalent(self, stask):
         """ Compares this StatusTask with that described by stask, and
             if they are the same ignoring status then they are equivalent
-            Arguments:
+
+            Args:
                 stask: StatusTask to compare against
             Returns:
-                True: if same ignoring status
-                False: if different
+                boolean: True if same ignoring status, False if different
         """
         if not MsgStatusTask.isEquivalent(self, stask):
             return False
@@ -522,17 +549,20 @@ class NoticeStatusTask(MsgStatusTask):
             return False
         return True
 
-    def run(self, output_func, phasename, wfsys, task,
+    def run(self, output_func, phasename, wfsys, tasklist,
             alwaysRun, options):
         """ Displays a notice to the user
-            Arguments:
+
+            Args:
                 output_func: Method for writing status to, which takes
-                             arguments, line to write and boolean indicating
-                             if end of line
+                arguments, line to write and boolean indicating
+                if end of line
             Returns:
-                True if should continue
-                False if should stop
+                boolean: True if should continue, False if should stop
         """
+
+        if options is not None and  options.fix:
+            return self.manualFix()
 
         self.status = constants.SUCCESS
         # Assuming here that a terminal is 80 characters wide.
@@ -584,7 +614,8 @@ class DynamicTaskValidator():
 
     def validRefId(self, fieldStr, wfsys, msgs):
         """ validates reference task id
-            Arguments:
+
+            Args:
                 fieldStr: field value
                 wfsys: the workflowsystem object containing existing tasks
                 msgs: a list to contain messages for user
@@ -610,7 +641,8 @@ class DynamicTaskValidator():
 
     def validHostsFormat(self, fieldStr, msgs):
         """ validates hosts field format against regular expression
-            Arguments:
+
+            Args:
                 fieldStr: field value
                 msgs: a list to contain messages for user
             Returns:
@@ -627,14 +659,15 @@ class DynamicTaskValidator():
         return validity
 
     def validHostsServer(self, hostsStr, serverStr, refId, wfsys, hosts, msgs):
-        """ validates that the hosts and server entries are not inconsistent
-            - ie that
-            Server value is *, local or within hosts file
+        """ validates that the hosts and server entries are not inconsistent.
+            ie that
+            Server value is '*', local or within hosts file
             Hosts number if present is within the range of the number of hosts
-               as constrained by server type
+            as constrained by server type
             if refId is in a group then hostsStr and ServerStr match with
-               the entries on the refId task
-            Arguments:
+            the entries on the refId task
+
+            Args:
                 hostsStr: the hosts value on the new task
                 serverStr: the servertype value on the new task
                 refId: the reference task
@@ -642,7 +675,7 @@ class DynamicTaskValidator():
                 hosts: the hosts for the workflow
                 msgs: a list to contain messages for user
             Returns:
-                True if ok, otherwise False
+                boolean: True if ok, otherwise False
         """
         validity = True
         log.debug("checking validity for hosts %s and servertype %s" % \
@@ -783,11 +816,12 @@ class DynamicTaskValidator():
 
     def validPosition(self, fieldStr, msgs):
         """ validates position as before or after
-        Arguments:
+
+        Args:
                 fieldStr: field value
                 msgs: a list to contain messages for user
         Returns:
-            True if valid, False if invalid
+            boolean: True if valid, False if invalid
         """
         if fieldStr == constants.DYNAMIC_BEFORE or \
                fieldStr == constants.DYNAMIC_AFTER:
@@ -800,16 +834,17 @@ class DynamicTaskValidator():
 
     def validDependencies(self, fieldStr, wfsys, refid, pos, msgs):
         """ validates dependencies field
-            Arguments:
+
+            Args:
                 fieldStr: field value
                 wfsys: the workflowsystem object containing existing tasks
                 refid: the id that the dynamic task is to be positioned
-                    relative to
+                relative to
                 pos: whether before or after the refid task
                 msgs: a list to contain messages for user
             Returns:
                 boolean: True if not empty and all entries valid
-                             of if empty, else False
+                of if empty, else False
         """
         validity = True
         if fieldStr is None:
@@ -817,7 +852,7 @@ class DynamicTaskValidator():
         if fieldStr == "":
             return True
 
-        depList = fieldStr.split(',')
+        depList = utils.split_commas(fieldStr)
         if len(depList) != 0:
             # first validate reference id and relative position for our task
             reftaskinds = \
@@ -862,7 +897,8 @@ class DynamicTaskValidator():
 
     def validBooleanField(self, fieldStr, req, msgs):
         """ validates optional field to be true, false, or empty
-            Arguments:
+
+            Args:
                 fieldStr: field value
                 req: if True then the value may not be empty
                 msgs: a list to contain messages for user
@@ -888,7 +924,8 @@ class DynamicTaskValidator():
 
     def validFreeTextLine(self, fieldStr, req, msgs):
         """ validates that free text does not include linefeed
-            Arguments:
+
+            Args:
                 fieldStr: field value
                 req: boolean whether field is required (ie cannot be empty)
                 msgs: a list to contain messages for user
@@ -908,7 +945,8 @@ class DynamicTaskValidator():
     def validCheckparams(self, fieldStr, msgs):
         """ validates checkparams field
             comma-separated list of key=value pairs
-            Arguments:
+
+            Args:
                 fieldStr: field value
                 msgs: a list to contain messages for user
             Returns:
@@ -935,7 +973,8 @@ class DynamicTaskValidator():
 
     def validUniqueTaskId(self, fieldStr, wfsys, msgs):
         """ validates taskId field for uniqueness in workflow
-            Arguments:
+
+            Args:
                 fieldStr: field value
                 wfsys: the workflowsystem object containing existing tasks
                 msgs: a list to contain messages for user
@@ -954,7 +993,8 @@ class DynamicTaskValidator():
 
     def validExecuteTaskId(self, fieldStr, dyntype, wfsys, msgs):
         """ validates taskId exists in execute phase and is a dynamic msg task
-            Arguments:
+
+            Args:
                 fieldStr: field value
                 dyntype: string representing pause or escape
                 wfsys: the workflowsystem object containing existing tasks
@@ -990,7 +1030,8 @@ class DynamicTaskValidator():
 
     def validIniParam(self, fieldStr, wfsys, msgs):
         """ validates that if the field is a parameter then it is in ini params
-           Arguments:
+
+           Args:
                fieldStr: field value (can be empty)
                wfsys: the workflowsystem object containing existing tasks
                msgs: a list to contain messages for user
@@ -1017,7 +1058,8 @@ class DynamicTaskValidator():
     def hasDependents(self, taskId, wfsys, msgs):
         """ checks whether the given task id appears as a dependency in
             any other task
-            Arguments:
+
+            Args:
                 taskId: the task to check
                 wfsys: the workflowsystem object containing existing tasks
                 msgs: a list to contain messages for user
@@ -1049,16 +1091,17 @@ class DynamicTaskValidator():
     def validGroupDepSingle(self, depsingle, refId, dependencies, wfsys, msgs):
         """ checks that IF the tasks are in the same group, then
             depSingle is not set to False
-            Arguments:
+
+            Args:
                 depsingle: the value of the depsingle field
                 dependencies: list of tasks on which this task depends
                 refId: the task which the new task is being positioned with
-                       reference to
+                reference to
                 wfsys: the workflowsystem object containing existing tasks
                 msgs: a list to contain messages for user
             Returns:
                 boolean: False if task and any dependency share a group and
-                         depsingle is not true
+                depsingle is not true
         """
         validity = True
 
@@ -1074,7 +1117,7 @@ class DynamicTaskValidator():
         if newtaskgroup is None:
             return True
 
-        depList = dependencies.split(',')
+        depList = utils.split_commas(dependencies)
         if len(depList) != 0:
             for dep in depList:
                 inds = wfsys.execute.getTaskIndices(dep)

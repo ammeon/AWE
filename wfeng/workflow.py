@@ -1,6 +1,6 @@
 """ Module represents the workflow as read from workflow xml file, it does
     not contain host specific information and is the generic workflow
-@copyright: Ammeon Ltd
+    @copyright: Ammeon Ltd
 """
 from wfeng.task import FabricTaskManager, GroupTask
 from wfeng.task import TagTask, ParallelTask
@@ -21,7 +21,8 @@ class Workflow:
 
     def __init__(self, config):
         """Initialises workflow.
-           Arguments:
+
+           Args:
                config: WfmgrConfig object with wfeng config
         """
         self.display = []
@@ -37,7 +38,8 @@ class Workflow:
 
     def _parsePhase(self, phase, element):
         """Parses a phase of workflow, with task items
-           Arguments:
+
+           Args:
                phase: list to hold any tasks found
                element: the element holding this phase, e.g. display, pre-check
            Returns:
@@ -132,7 +134,8 @@ class Workflow:
 
     def _createMsgTask(self, child, task_type):
         """ Creates a MsgTask by getting attributes out of child.
-            Arguments:
+
+            Args:
                 child: Child XML element
                 task_type: A string representing the type of the task;
                 one of pause, escape or notice
@@ -203,7 +206,8 @@ class Workflow:
 
     def parse(self, filename):
         """Parses workflow filename to produce list of tasks
-           Arguments:
+
+           Args:
                filename: Name of XML workflow file
            Returns:
                True if parsed correctly
@@ -262,7 +266,7 @@ class Workflow:
             workflow and task file, describing which tasks to run on
             which servers with status as INITIAL
 
-            Arguments:
+            Args:
                 hosts - Hosts object that contains details of hosts
             Returns:
                 wfsystem - WorkflowSystem object
@@ -277,7 +281,8 @@ class Workflow:
     def _genWorkflowPhase(self, phase, wsysphase, hosts):
         """ Populates phase of workflowsystem with the individual
             tasks that need to be run on each host
-            Arguments:
+
+            Args:
                 phase - list of tasks to process
                 wsysphase - phase of workflow system to populate
                 hosts - list of hosts to run workflow on
@@ -326,7 +331,7 @@ class Workflow:
         # Check dependency is a task we have added
         # Split dependency by ,
         found = []
-        dependencies = dependency.split(",")
+        dependencies = utils.split_commas(dependency)
         for i in range(len(dependencies)):
             found.append(False)
             for otask in (self.display + self.precheck +
@@ -346,7 +351,8 @@ class Workflow:
     def _hasMissingIniParam(self, strng):
         """ validates that any parameters in the supplied string are found
             in the ini file parameters
-            Arguments:
+
+            Args:
                 strng: supplied string which may contain $-prefixed parameters
             Returns:
                 False if there are no unmatched params, True if there are
@@ -367,7 +373,8 @@ class Workflow:
 
     def _parseTask(self, child, phasename):
         """ Parses a child element that is a task.
-            Arguments:
+
+            Args:
                 child: Child element
                 phasename: Name of phase parsing
             Returns:
@@ -423,7 +430,8 @@ class Workflow:
 
     def _parseMsgTask(self, child, phasename):
         """ Parses a child element that is a message task.
-            Arguments:
+
+            Args:
                 child: Child element
                 phasename: Name of phase parsing
             Returns:

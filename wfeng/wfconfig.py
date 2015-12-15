@@ -3,7 +3,7 @@
 """
 import os
 import logging
-from wfeng import constants
+from wfeng import constants, utils
 
 
 # Special output strings so that scripts can summarise error to display
@@ -17,6 +17,12 @@ DISPLAY_INFO = "DISPLAY_INFO"
 PRECHECK_INFO = "PRECHECK_INFO"
 POSTCHECK_INFO = "POSTCHECK_INFO"
 EXECUTE_INFO = "EXECUTE_INFO"
+KEEPALIVE = "KEEPALIVE"
+SWVERSIONPLUGIN = "SWVERSIONPLUGIN"
+OSVERSIONPLUGIN = "OSVERSIONPLUGIN"
+EXTRA_LOGPARAM = "EXTRA_LOGPARAM"
+EXTRA_LOGPARAMLIST = "EXTRA_LOGPARAMLIST"
+
 #Keys to identify values in the DISPLAY_INFO line that indicate version and
 #type
 SWVER = "SWVER"
@@ -50,15 +56,24 @@ class WfmgrConfig(object):
         self.cfg[OSVER] = "OSVERSION"
         self.cfg[TYPE] = "TYPE"
         self.cfg[UNKNOWN] = "UNKNOWN"
+        self.cfg[KEEPALIVE] = "0"
+        self.cfg[EXTRA_LOGPARAM] = ""
         self.iniparams = {}
 
     def load(self):
+        """ Loads config file, and returns whether loaded successfully"""
         filename = constants.CFG_FILE
         if os.path.isfile(filename):
             with open(filename) as cfgfile:
                 for line in cfgfile:
                     name, var = line.partition("=")[::2]
+                    if name.strip() == KEEPALIVE:
+                        if not utils.is_number(var.strip()):
+                            log.debug("Non-integer for " + KEEPALIVE)
+                            return False
                     self.cfg[name.strip()] = var.strip()
             log.debug("wfeng.cfg located and loaded: {0}".format(self.cfg))
         else:
             log.debug("No wfeng.cfg to load")
+        self.cfg[EXTRA_LOGPARAMLIST] = self.cfg[EXTRA_LOGPARAM].split(",")
+        return True
