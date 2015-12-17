@@ -13,10 +13,12 @@ import logging
 import threading
 import datetime
 import traceback
+import errno
 import sys
 from wfeng import wfconfig
 # import re
 import subprocess
+import signal
 # import threading
 import multiprocessing
 from lxml import etree
@@ -76,11 +78,11 @@ class FabricTask(WTask):
             returns if they are the same. It ignores the hosts parameter
             as when this is part of a StatusTask the hosts is irrelevant, as
             it will have been expanded to a Host object
-            Arguments:
+
+            Args:
                 task: Task to compare against
             Returns:
-                True: if same
-                False: if different
+                boolean: True if same, False if different
         """
         if not WTask.equals(self, task):
             return False
@@ -127,7 +129,8 @@ class FabricTask(WTask):
 
     def getStatusTasks(self, host):
         """ Returns a list of StatusTask objects in order to be processed.
-            Arguments:
+
+            Args:
                 host: Host to run on
             Returns:
                 list of StatusTask classes
@@ -139,13 +142,16 @@ class FabricTask(WTask):
                             host_colour, ps_logger):
         """ Runs fabric task (local or remote):
             ps_logger is a process safe logger
-            Arguments: host Host object to run on
-                       infoprefixes: List of info prefixes to look for
-                       errprefixes: List of info prefixes to look for
-                       output_level: Log level
-                       host_colour: colour to use
-                       ps_logger: Process safe logger
-            Returns result object
+
+            Args:
+                host: Host object to run on
+                infoprefixes: List of info prefixes to look for
+                errprefixes: List of info prefixes to look for
+                output_level: Log level
+                host_colour: colour to use
+                ps_logger: Process safe logger
+            Returns:
+                result object
         """
         os.environ['SERVERNAME'] = host.hostname
         os.environ['SERVERTYPE'] = self.servertype
@@ -191,14 +197,16 @@ class FabricTask(WTask):
                              err_prefixes, info_prefixes, logger):
         """ Processes a Fabric Result object and populates a generic
             RunStatus.
-            Arguments: result: retruned from task's process_result
-                       status: RunStatus object to populate
-                       host: Host to populate with any parameters
-                       has_status: If status could be present
-                       stype: expected server type
-                       err_prefixes: Error line prefix for display
-                       info_prefixes: Info line prefix
-                       logger: Process-safe logger
+
+            Args:
+                result: retruned from task's process_result
+                status: RunStatus object to populate
+                host: Host to populate with any parameters
+                has_status: If status could be present
+                stype: expected server type
+                err_prefixes: Error line prefix for display
+                info_prefixes: Info line prefix
+                logger: Process-safe logger
         """
         status.returncode = -1
         if hasattr(result, "return_code"):
@@ -215,7 +223,8 @@ class FabricTask(WTask):
     def _parseResp(self, host, result, has_status, stype, status,
                                 errprefixes, infoprefixes, logger):
         """Parses result from a remote task that succeeded
-           Arguments:
+
+           Args:
                host: Host object to populate with parameters
                result: Result returned from Fabric
                has_status: bool whether status could be present or not
@@ -280,14 +289,15 @@ class FabricTask(WTask):
 
     def _parseStatusLine(self, host, statusline, stype, infoprefix, logger):
         """Parses display status line
-           Arguments:
+
+           Args:
                host: Host object to update
                statusline: Contents of statusline after STATUS prefix
                stype: expected server type
                infoprefix: status prefix
                logger: process-safe logger
            Returns:
-               None: if successfully parsed, else error description
+               String: None if successfully parsed, else error description
         """
         err_msg = None
         # We may get more than one info line. If the line matches format of
@@ -342,14 +352,16 @@ class RemoteFabricTask(FabricTask):
         """ Returns copy of task but with different servertype """
         return RemoteFabricTask(self.name, self.config, self.cmd, self.hosts,
                                server, self.continueOnFail, self.optional,
-                               self.duration, self.dependency, self.swversion,
+                               self.duration, self.dependency,
+                               self.swversion,
                                self.osversion, self.run_local,
                                self.depsinglehost, self.checkparams, self.gid)
 
     def _do_execute(self, host, infoprefixes, errprefixes, output_level,
                           host_colour, ps_logger):
         """ Runs remote fabric task:
-            Arguments: host Host object to run on
+
+            Args: host Host object to run on
             ps_logger is a process-safe logger
             Returns result object
         """
@@ -383,14 +395,16 @@ class LocalFabricTask(FabricTask):
         """ Returns copy of task but with different servertype """
         return LocalFabricTask(self.name, self.config, self.cmd, self.hosts,
                                server, self.continueOnFail, self.optional,
-                               self.duration, self.dependency, self.swversion,
+                               self.duration, self.dependency,
+                               self.swversion,
                                self.osversion, self.run_local,
                                self.depsinglehost, self.checkparams, self.gid)
 
     def _do_execute(self, host, infoprefixes, errprefixes, output_level,
                                 host_colour, ps_logger):
         """ Runs local fabric task:
-            Arguments: host Host object to run on, ignored
+
+            Args: host Host object to run on, ignored
             ps_logger is a process safe logger
             Returns result object
         """
@@ -401,7 +415,7 @@ class LocalFabricTask(FabricTask):
         # local(self.fullcmd, capture=True)
         cmd = utils.replace_vars(self.fullcmd, os.environ)
 
-        p = subprocess.Popen(cmd, shell=True,
+        p = subprocess.Popen(cmd, shell=True, preexec_fn=self.local_handler,
                                       stdout=subprocess.PIPE,
                                       stderr=subprocess.STDOUT)
         result = DummyResult()
@@ -410,7 +424,18 @@ class LocalFabricTask(FabricTask):
         else:
             prefix = "{0}_{1}".format(self.name, host.hostname)
         while 1:
-            out = p.stdout.readline()
+            # NB. Ctrl-C will interrupt readline so need to catch and swallow
+            # the IOError
+            try:
+                out = p.stdout.readline()
+            except IOError as e:
+                if e.errno != errno.EINTR:
+                # IOError is not an interrupt - so not Ctrl-C
+                    raise
+                elif not out:
+                    # Continue round - as just caught a Ctrl-C and we
+                    # want to continue to read the stdout from the command
+                    continue
             if not out:
                 break
             else:
@@ -435,6 +460,13 @@ class LocalFabricTask(FabricTask):
     def getCmdHostLogStr(self, host):
         expanded_cmd = self.getFullCmd(host)
         return "%s on LOCAL" % (expanded_cmd)
+
+    def local_handler(self):
+        # Called before the process created to run local tasks is running.
+        # We ignore SIGINT so that it does not interrupt the command being
+        # run on the local box. If we do not do this the Ctrl-C will interrupt
+        # the command, and we want to wait for it to finish
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
 class FabricRunTask(Task):
@@ -487,11 +519,11 @@ class GroupTask(WTask):
     def equals(self, task):
         """ Compares this Task with that described by task, and
             returns if they are the same.
-            Arguments:
+
+            Args:
                 task: Task to compare against
             Returns:
-                True: if same
-                False: if different
+                boolean: True if same, False if different
         """
         if not WTask.equals(self, task):
             return False
@@ -510,7 +542,8 @@ class GroupTask(WTask):
     def getStatusTasks(self, host):
         """ Returns a list of StatusTask objects in order to be processed.
             As this is a group, go through each underlying task
-            Arguments:
+
+            Args:
                 host: Host to run on
             Returns:
                 list of StatusTask classes
@@ -577,7 +610,8 @@ class FabricStatusTask(StatusTask):
     """ Represents a workflow task with status """
     def __init__(self, task, host, status):
         """ Initialises StatusTask
-            Arguments:
+
+            Args:
                 task: FabricTask object
                 host: Host object
                 status: String with status
@@ -594,11 +628,11 @@ class FabricStatusTask(StatusTask):
     def isEquivalent(self, stask):
         """ Compares this StatusTask with that described by stask, and
             if they are the same ignoring status then they are equivalent
-            Arguments:
+
+            Args:
                 stask: StatusTask to compare against
             Returns:
-                True: if same ignoring status
-                False: if different
+                boolean: True if same ignoring status, False if different
         """
         if not self.task.equals(stask.task):
             log.debug("Task %s didn't match %s" % (self.task.name,
@@ -610,18 +644,18 @@ class FabricStatusTask(StatusTask):
             return False
         return True
 
-    def run(self, output_func, phasename, wfsys, task,
+    def run(self, output_func, phasename, wfsys, tasklist,
                   alwaysRun, options,
                   parallelRun=False,
                   logger=log, host_colour='\033[0m'):
         """ Runs a task remotely or locally using Fabric
-            Arguments:
+
+            Args:
                 output_func: Method for writing status to, which takes
-                             arguments, line to write and boolean indicating
-                             if end of line
+                arguments, line to write and boolean indicating
+                if end of line
             Returns:
-                True if should continue
-                False if should stop
+                boolean: True if should continue, False if should stop
         """
         if options.fix:
             genid = self.getId()
@@ -634,6 +668,7 @@ class FabricStatusTask(StatusTask):
             return WorkflowStatus(WorkflowStatus.COMPLETE, "")
         spinnerThread = None
         env.parallel = False
+        env.keepalive = int(wfsys.config.cfg["KEEPALIVE"])
         env.eager_disconnect = True
         env.linewise = True
         env.skip_bad_hosts = True
@@ -843,7 +878,8 @@ class TagTask(WTask):
 
     def getStatusTasks(self, host):
         """ Returns a list of StatusTask objects in order to be processed.
-            Arguments:
+
+            Args:
                 host: Host to run on, will be ignored
             Returns:
                 list of StatusTask classes
@@ -854,11 +890,11 @@ class TagTask(WTask):
     def equals(self, task):
         """ Compares this Task with that described by task, and
             returns if they are the same.
-            Arguments:
+
+            Args:
                 task: Task to compare against
             Returns:
-                True: if same
-                False: if different
+                boolean: True if same, False if different
         """
         if not WTask.equals(self, task):
             return False
@@ -882,7 +918,8 @@ class TagStatusTask(StatusTask):
     """ Represents a tag task with status """
     def __init__(self, task, status):
         """ Initialises StatusTask
-            Arguments:
+
+            Args:
                 task: TagTask object
                 status: String with status
         """
@@ -933,9 +970,10 @@ class ParallelTask(WTask):
 
     def getStatusTasks(self, host):
         """ Returns a list of StatusTask objects in order to be processed.
-            Arguments:
+
+            Args:
                 host: Host to run on, Ignored as use hostSequences to
-                      know what hosts to run each sequence within parallel on
+                know what hosts to run each sequence within parallel on
             Returns:
                 list of StatusTask classes
         """
@@ -952,11 +990,11 @@ class ParallelTask(WTask):
     def equals(self, task):
         """ Compares this Task with that described by task, and
             returns if they are the same.
-            Arguments:
+
+            Args:
                 task: Task to compare against
             Returns:
-                True: if same
-                False: if different
+                boolean: True if same, False if different
         """
         if not WTask.equals(self, task):
             return False
@@ -1064,12 +1102,14 @@ class ParallelStatusTask(StatusTask):
     """ Represents a parallel task with status """
     def __init__(self, task, status):
         """ Initialises StatusTask
-            Arguments:
+
+            Args:
                 task: ParallelTask object
                 status: String with status
         """
         StatusTask.__init__(self, task, status)
         self.sequences = []  # array of SequenceStatusTasks
+        self.sequenceThreads = []
 
     def containsTask(self, taskname):
         """ Returns if this task contains taskname """
@@ -1117,11 +1157,11 @@ class ParallelStatusTask(StatusTask):
     def isEquivalent(self, stask):
         """ Compares this StatusTask with that described by stask, and
             if they are the same ignoring status then they are equivalent
-            Arguments:
+
+            Args:
                 stask: StatusTask to compare against
             Returns:
-                True: if same ignoring status
-                False: if different
+                boolean: True if same ignoring status, False if different
         """
         if not isinstance(stask, ParallelStatusTask):
             log.debug("Task is not a ParallelStatusTask {0}".\
@@ -1182,21 +1222,21 @@ class ParallelStatusTask(StatusTask):
         return hostlist
 
     def listTasks(self, servertypes, servernames, excluded, input,
-                       force, exact_match):
+                       force, version_checker):
         """ Returns a list of tuples of tasks/booleans, where boolean is
             true if should run on server, false if not """
         ret = []
         for seq in self.sequences:
             for task in seq.tasks:
                 if task.shouldRunOnHost(servertypes, servernames, excluded,
-                        input, force, exact_match):
+                        input, force, version_checker):
                     ret.append((task, True))
                 else:
                     ret.append((task, False))
         return ret
 
     def sequenceNoneToRun(self, servertypes, servernames, excluded, input,
-                       force, exact_match):
+                       force, version_checker):
         """returns True if the sequence has no tasks runnable for the given
            parameters, or False if any task in the sequence is eligible to
            run"""
@@ -1206,24 +1246,24 @@ class ParallelStatusTask(StatusTask):
                 # only check status on those tasks that are eligible for
                 # the given run parameters
                 if task.shouldRunOnHost(servertypes, servernames, excluded,
-                        input, force, exact_match):
+                        input, force, version_checker):
                     # if task status is not in SUCCESS_STATUSES then it could
                     # be eligible for run
                     if not task.status in constants.SUCCESS_STATUSES:
                         ret = False
         return ret
 
-    def run(self, output_func, phasename, wfsys, task,
+    def run(self, output_func, phasename, wfsys, tasklist,
                   alwaysRun, options):
         """ Runs a set of tasks in parallel
-            Arguments:
+
+            Args:
                 output_func: Method for writing status to, which takes
-                             arguments, line to write and boolean indicating
-                             if end of line
+                arguments, line to write and boolean indicating
+                if end of line
             Returns:
                 WorkflowStatus
         """
-        sequenceThreads = []
         stoppedThreads = []
         spinnerThread = None
         log_queue_reader = None
@@ -1239,35 +1279,43 @@ class ParallelStatusTask(StatusTask):
                 host_colour = constants.Colours.host_colours[i % \
                                   len(constants.Colours.host_colours)]
                 self.sequences[i].makeReadyForProcessing()
-                seqTask = task
-                if task == self.getId():
+                seqTasklist = tasklist
+                if tasklist != None and self.getId() in tasklist:
                     # If task asked to run is whole parallel task
                     # then no need to send specific task id to
                     # sequence
-                    seqTask = None
+                    seqTasklist = None
                 sequenceThread = sequenceprocess.SequenceProcess(
                                  self.sequences[i],
                                  output_func, phasename, wfsys,
-                                 host_colour, seqTask, alwaysRun,
+                                 host_colour, seqTasklist, alwaysRun,
                                  options, statusQueue)
-                if sequenceThread.will_run(log):
+                trapped = wfsys.trapped
+                if sequenceThread.will_run(log) and not trapped:
                     log.log(constants.TRACE,
                            "Starting thread for sequence {0}".format(\
                            self.sequences[i].id))
-                    sequenceThreads.append(sequenceThread)
+                    self.sequenceThreads.append(sequenceThread)
                     sequenceThread.start()
                     stoppedThreads.append(False)
                     # So as to not flood ssh service with lots of connection
                     # requests at same time
                     time.sleep(options.parallel_delay)
                 else:
-                    log.log(constants.TRACE,
+                    if trapped:
+                        log.log(constants.TRACE,
+                           "Did not start sequence due to Ctrl-C{0}".format(\
+                           self.sequences[i].id))
+                        sequenceThread.status = \
+                             WorkflowStatus(WorkflowStatus.FAILED, "")
+                    else:
+                        log.log(constants.TRACE,
                            "Log only for sequence {0}".format(\
                            self.sequences[i].id))
-                    sequenceThreads.append(None)
-                    self._log_sequence(self.sequences[i])
-                    sequenceThread.status = \
+                        sequenceThread.status = \
                              WorkflowStatus(WorkflowStatus.COMPLETE, "")
+                        self._log_sequence(self.sequences[i])
+                    self.sequenceThreads.append(None)
                     stoppedThreads.append(True)
 
             # Start spinner and queue reader after created sequence threads
@@ -1292,7 +1340,7 @@ class ParallelStatusTask(StatusTask):
                 someAlive = False
                 for i in range(len(self.sequences)):
                     if stoppedThreads[i] == False:
-                        if sequenceThreads[i].is_alive():
+                        if self.sequenceThreads[i].is_alive():
                             log.log(constants.TRACE,
                               "Thread {0} is alive".format(i))
                             someAlive = True
@@ -1307,8 +1355,8 @@ class ParallelStatusTask(StatusTask):
 
             log.log(constants.TRACE, "Processes are stopped so now join")
             for i in range(len(self.sequences)):
-                if sequenceThreads[i] != None:
-                    sequenceThreads[i].join()
+                if self.sequenceThreads[i] != None:
+                    self.sequenceThreads[i].join()
             log.log(constants.TRACE, "Joined with all processes")
 
             readQueue = False
@@ -1381,7 +1429,7 @@ class ParallelStatusTask(StatusTask):
         return (numSuccess, numFailed, numSkipped)
 
     def shouldRunOnHost(self, servertypes, servernames, excluded, inputmgr,
-                              force, exact_match):
+                              force, version_checker):
         """ We should run if any of the tasks in our sequences say to run
         """
         run_on_server = False
@@ -1390,7 +1438,7 @@ class ParallelStatusTask(StatusTask):
                 task = seq.tasks[i]
                 if task.shouldRunOnHost(servertypes, servernames,
                                         excluded, inputmgr, force,
-                                        exact_match):
+                                        version_checker):
                     run_on_server = True
                     seq.should_run_task[i] = run_on_server
 
@@ -1413,7 +1461,8 @@ class SequenceStatusTask(StatusTask):
     """ Represents a sequence of tasks within parallel set with status """
     def __init__(self, task, host):
         """ Initialises StatusTask
-            Arguments:
+
+            Args:
                 task: SequenceTask object, only used for its id
                 host: Host object
         """

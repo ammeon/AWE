@@ -1,7 +1,8 @@
 #!/usr/lib/python
 """ Outer module that just invokes WorkflowEngine instance, set alias to
     this module
-@copyright: Ammeon Ltd
+    @copyright: Ammeon Ltd
+
 """
 import threading
 import sys

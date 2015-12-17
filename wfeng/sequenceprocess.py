@@ -35,7 +35,7 @@ def dumpstack(signal, frame):
 
 class SequenceProcess(multiprocessing.Process):
     def __init__(self, sequence, outputfunc, phasename, wfsys,
-                       host_colour, task, alwaysRun, options,
+                       host_colour, tasklist, alwaysRun, options,
                        queue):
         super(SequenceProcess, self).__init__()
         self.output_func = outputfunc
@@ -44,20 +44,32 @@ class SequenceProcess(multiprocessing.Process):
         self.status = None
         self.wfsys = wfsys
         self.host_colour = host_colour
-        self.task = task
+        self.tasklist = tasklist
         self.alwaysRun = alwaysRun
         self.options = options
         self.queue = queue
+        self.logger = None
         # Add handler for subprocesses
         self.subproc = SubProcessLogHandler(wfsys.logqueue)
         formatter = WfengFormatter('%(asctime)s %(message)s')
         self.subproc.setFormatter(formatter)
         self.subproc.setLevel(constants.TRACE)
 
+    def interrupt_handler(self, signal, frame):
+        """ Output that Ctrl C has been caught"""
+        # Updates the copy of wfsys owned by this sub-process and has
+        # different log statement. Use print so goes directly to screen,
+        # rather than through event channels
+        print "INTERRUPT CAUGHT - sub-process will stop after current " \
+                  "task on %s has finished" % self.seq.tasks[0].host.hostname
+        self.wfsys.trapped = True
+
     def run(self):
-        """ Runs each of its tasks sequentially unless task
+        """ Runs each of its tasks sequentially unless tasklist
             is specified"""
         signal.signal(signal.SIGUSR1, dumpstack)
+        # Update the signal handler for Ctrl-C to be this local one
+        signal.signal(signal.SIGINT, self.interrupt_handler)
         logging.addLevelName(constants.TRACE, "TRACE")
         logging.addLevelName(constants.DEBUGNOTIME, "DEBUGNOTIME")
         # Put our logger on the root logger
@@ -67,6 +79,14 @@ class SequenceProcess(multiprocessing.Process):
         self.logger = root_logger
         try:
             for i in range(len(self.seq.tasks)):
+                if self.wfsys.trapped:
+                    self.logger.info(
+                         "Stopping before task %s on %s due to Ctrl-C" %
+                                     (self.seq.tasks[i].task.name,
+                                     self.seq.tasks[i].host.hostname))
+                    self.seq.wfstatus.value = \
+                          self.seq.getWfValue(WorkflowStatus.FAILED)
+                    return
                 hostip = self.seq.tasks[i].host.ipaddr
                 if self.seq.tasks[i].task.servertype == constants.LOCAL or \
                     self.seq.tasks[i].task.run_local == True:
@@ -88,7 +108,7 @@ class SequenceProcess(multiprocessing.Process):
                          "Calling task {0}".format(self.seq.tasks[i].getId()))
                     self.status = self.seq.tasks[i].run(self.output_func,
                                                 self.phasename, self.wfsys,
-                                                self.task,
+                                                self.tasklist,
                                                 self.alwaysRun,
                                                 self.options,
                                                 True,
@@ -144,7 +164,8 @@ class SequenceProcess(multiprocessing.Process):
 
     def _task_will_run(self, i, logger):
         """ Returns whether this task in sequence needs to be run.
-            Arguments:
+
+            Args:
                i, index into tasks array """
 
         will_run = True
@@ -155,7 +176,8 @@ class SequenceProcess(multiprocessing.Process):
             will_run = False
         elif self.seq.should_run_task[i] == True and \
               self.seq.tasks[i].hasDependency():
-            dependencies = self.seq.tasks[i].task.dependency.split(",")
+            dependencies = \
+                   utils.split_commas(self.seq.tasks[i].task.dependency)
             for dep in dependencies:
                 # If dependency in this sequence then get its status
                 if self.seq.hasTask(dep):
@@ -181,8 +203,9 @@ class SequenceProcess(multiprocessing.Process):
                        dstatus))
                     will_run = False
                     break
-        if self.seq.should_run_task[i] and self.task != None:
-            if self.task != self.seq.tasks[i].task.name:
+
+        if self.seq.should_run_task[i] and self.tasklist != None:
+            if self.seq.tasks[i].task.name not in self.tasklist:
                 will_run = False
         return will_run
 

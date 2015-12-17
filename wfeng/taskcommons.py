@@ -21,6 +21,8 @@ class WTask:
         self.gid = None
         self.depsinglehost = False
         self.checkparams = {}
+        # Will be initialised when task created
+        self.pluginmgr = None
 
     def hasVersion(self):
         return False
@@ -28,11 +30,11 @@ class WTask:
     def equals(self, task):
         """ Compares this Task with that described by task, and
             returns if they are the same.
-            Arguments:
+
+            Args:
                 task: Task to compare against
             Returns:
-                True: if same
-                False: if different
+                boolean: True if same, False if different
         """
         if self.name != task.name:
             return False
@@ -54,7 +56,8 @@ class WTask:
 
     def getStatusTasks(self, host):
         """ Returns a list of StatusTask objects in order to be processed.
-            Arguments:
+
+            Args:
                 host: Host to run on, will be ignored
                 status: current status
             Returns:
@@ -113,11 +116,11 @@ class StatusTask:
     def isEquivalent(self, stask):
         """ Compares this StatusTask with that described by stask, and
             if they are the same ignoring status then they are equivalent
-            Arguments:
+
+            Args:
                 stask: StatusTask to compare against
             Returns:
-                True: if same ignoring status
-                False: if different
+                boolean: True if same ignoring status, False if different
         """
         if not self.task.equals(stask.task):
             log.debug("Task %s didn't match %s" % (self.task.name,
@@ -125,7 +128,7 @@ class StatusTask:
             return False
         return True
 
-    def run(self, output_func, phasename, wfsys, task,
+    def run(self, output_func, phasename, wfsys, tasklist,
                   alwaysRun, options):
         """ Base method for running_task, expected to be always overridden"""
         output_func("INVALID TASK %s" % self.task.name, True)
@@ -144,7 +147,7 @@ class StatusTask:
         return False
 
     def shouldRunOnHost(self, servertypes, servernames, excluded, inputmgr,
-                              force, exact_match):
+                              force, version_checker):
         """ Determines whether to run, returns True if hasHost is False,
             else expects task to have host parameter to check on,
             and swversion """
@@ -212,10 +215,13 @@ class StatusTask:
                                                   self.host.hostname)
                             if swversion != None:
                                 self.setSWVersion(swversion)
-                        if utils.check_version(taskversion, swversion,
-                                           exact_match):
-                            swMatch = True
-
+                        try:
+                            if version_checker.check_swversion(taskversion,
+                                                         swversion):
+                                swMatch = True
+                        except ValueError:
+                            log.error("Failed to compare sw versions %s/%s" \
+                                % (taskversion, swversion))
                 # Now check for osversion if we need it
                 osMatch = False
                 osversion = None
@@ -236,9 +242,13 @@ class StatusTask:
                                                   self.host.hostname)
                             if osversion != None:
                                 self.setOSVersion(osversion)
-                        if utils.check_version(taskversion, osversion,
-                                           exact_match):
-                            osMatch = True
+                        try:
+                            if version_checker.check_osversion(taskversion,
+                                                         osversion):
+                                osMatch = True
+                        except ValueError:
+                            log.error("Failed to compare os versions %s/%s" \
+                                % (taskversion, osversion))
                 if run_on_server:
                     # Work out results of version check
                     if (testOsMatch and not osMatch) or \

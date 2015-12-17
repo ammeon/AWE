@@ -1,8 +1,13 @@
 <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+    <xs:simpleType name="IDString">
+        <xs:restriction base="xs:string">
+            <xs:minLength value="1" />
+        </xs:restriction>
+     </xs:simpleType>
      <xs:element name="task">
          <xs:complexType>
              <xs:attribute name="cmd" type="xs:string" use="required"/>
-             <xs:attribute name="id" type="xs:string" use="required"/>
+             <xs:attribute name="id" type="IDString" use="required"/>
              <xs:attribute name="hosts" use="required">
                  <xs:simpleType>
                      <xs:restriction base="xs:string">
@@ -25,7 +30,7 @@
      <xs:element name="taskstatus">
          <xs:complexType>
              <xs:attribute name="cmd" type="xs:string" use="required"/>
-             <xs:attribute name="id" type="xs:string" use="required"/>
+             <xs:attribute name="id" type="IDString" use="required"/>
              <xs:attribute name="host" type="xs:string" use="required"/>
              <xs:attribute name="server" type="xs:string" use="required"/>
              <xs:attribute name="optional" type="xs:boolean" use="required"/>
@@ -45,17 +50,17 @@
      </xs:element>
      <xs:element name="start-tag">
          <xs:complexType>
-             <xs:attribute name="name" type="xs:string" use="required"/>
+             <xs:attribute name="name" type="IDString" use="required"/>
          </xs:complexType>
      </xs:element>
      <xs:element name="end-tag">
          <xs:complexType>
-             <xs:attribute name="name" type="xs:string" use="required"/>
+             <xs:attribute name="name" type="IDString" use="required"/>
          </xs:complexType>
      </xs:element>
      <xs:element name="escape">
          <xs:complexType>
-             <xs:attribute name="id" type="xs:string" use="required"/>
+             <xs:attribute name="id" type="IDString" use="required"/>
              <xs:attribute name="msg" type="xs:string" use="required"/>
              <xs:attribute name="hosts" use="required">
                  <xs:simpleType>
@@ -75,7 +80,7 @@
      </xs:element>
      <xs:element name="pause">
          <xs:complexType>
-             <xs:attribute name="id" type="xs:string" use="required"/>
+             <xs:attribute name="id" type="IDString" use="required"/>
              <xs:attribute name="msg" type="xs:string" use="required"/>
              <xs:attribute name="hosts" use="required">
                  <xs:simpleType>
@@ -95,7 +100,7 @@
      </xs:element>
      <xs:element name="notice">
          <xs:complexType>
-             <xs:attribute name="id" type="xs:string" use="required"/>
+             <xs:attribute name="id" type="IDString" use="required"/>
              <xs:attribute name="msg" type="xs:string" use="required"/>
              <xs:attribute name="hosts" use="required">
                  <xs:simpleType>
@@ -115,7 +120,7 @@
      </xs:element>
      <xs:element name="pausestatus">
          <xs:complexType>
-             <xs:attribute name="id" type="xs:string" use="required"/>
+             <xs:attribute name="id" type="IDString" use="required"/>
              <xs:attribute name="msg" type="xs:string" use="required"/>
              <xs:attribute name="status" type="xs:string" use="required"/>
              <xs:attribute name="host" type="xs:string" use="required"/>
@@ -132,7 +137,7 @@
      </xs:element>
      <xs:element name="escapestatus">
          <xs:complexType>
-             <xs:attribute name="id" type="xs:string" use="required"/>
+             <xs:attribute name="id" type="IDString" use="required"/>
              <xs:attribute name="msg" type="xs:string" use="required"/>
              <xs:attribute name="status" type="xs:string" use="required"/>
              <xs:attribute name="host" type="xs:string" use="required"/>
@@ -149,7 +154,7 @@
      </xs:element>
      <xs:element name="noticestatus">
          <xs:complexType>
-             <xs:attribute name="id" type="xs:string" use="required"/>
+             <xs:attribute name="id" type="IDString" use="required"/>
              <xs:attribute name="msg" type="xs:string" use="required"/>
              <xs:attribute name="status" type="xs:string" use="required"/>
              <xs:attribute name="host" type="xs:string" use="required"/>
@@ -171,7 +176,7 @@
                  <xs:element ref="escape" maxOccurs="unbounded"/>
                  <xs:element ref="notice" maxOccurs="unbounded"/>
              </xs:choice>
-             <xs:attribute name="id" type="xs:string" use="required"/>
+             <xs:attribute name="id" type="IDString" use="required"/>
          </xs:complexType>
      </xs:element>
      <xs:element name="parallel">
@@ -179,7 +184,7 @@
              <xs:sequence>
                  <xs:element ref="task" maxOccurs="unbounded" minOccurs="1"/>
              </xs:sequence>
-             <xs:attribute name="id" type="xs:string" use="required"/>
+             <xs:attribute name="id" type="IDString" use="required"/>
          </xs:complexType>
      </xs:element>
      <xs:element name="parallelstatus">
@@ -187,7 +192,7 @@
              <xs:sequence>
                  <xs:element ref="sequencestatus" maxOccurs="unbounded" minOccurs="1"/>
              </xs:sequence>
-             <xs:attribute name="id" type="xs:string" use="required"/>
+             <xs:attribute name="id" type="IDString" use="required"/>
          </xs:complexType>
      </xs:element>
      <xs:element name="sequencestatus">
@@ -195,7 +200,7 @@
              <xs:sequence>
                  <xs:element ref="taskstatus" maxOccurs="unbounded" minOccurs="1"/>
              </xs:sequence>
-             <xs:attribute name="id" type="xs:string" use="required"/>
+             <xs:attribute name="id" type="IDString" use="required"/>
              <xs:attribute name="host" type="xs:string" use="required"/>
              <xs:attribute name="server" type="xs:string" use="required"/>
          </xs:complexType>

@@ -1,5 +1,7 @@
 """Responsible for getting user input about whether to run tasks
-@copyright: Ammeon Ltd
+   and user input about whether to go ahead with manual reset
+   @copyright: Ammeon Ltd
+
 """
 import logging
 import os
@@ -7,11 +9,15 @@ from wfeng import constants
 from wfeng import wfconfig
 import sys
 import utils
+import errno
 
 SKIP_PROMPT = "Do you wish to run task (y), skip (s) or exit (n)?:\n"
 SKIP_SERVER_PROMPT = "Do you wish to skip all tasks on server {0}(y/n)?:\n"
 HOST_PROMPT = "Please enter {0} version of host {1}: \n"
 HYPHEN_LINE = "---------------------------------------------------------------"
+RESET_PROMPT1 = "There are completed tasks dependent on task {0}"
+RESET_PROMPT2 = "Do you want to force reset on task {0}(y/n)?:\n"
+
 
 LOG = logging.getLogger(__name__)
 
@@ -21,54 +27,76 @@ class InputMgr(object):
        commands"""
 
     def askRunSkipTask(self, task, excluded):
-        """ Prompts user whether to run, skip task.
-            Arguments:
-                task: StatusTask to run
-                excluded: Current list of servers to exclude, is updated
-                          if user chooses to skip all tasks on this
-                          server
-            Returns:
-                0 to run, 1 to skip, 2 to exit
+        """Prompts user whether to run, skip task.
+
+           Args:
+               task: StatusTask to run
+               excluded: Current list of servers to exclude, is updated
+               if user chooses to skip all tasks on this server
+           Returns:
+               int: 0 to run, 1 to skip, 2 to exit
         """
         ret_val = 0
         choice = ""
-        while choice != "y" and choice != "n" and choice != "s":
-            choice = raw_input(SKIP_PROMPT)
-            if choice == "n":
-                LOG.info("Stopping workflow as requested")
+        try:
+            while choice != "y" and choice != "n" and choice != "s":
+                choice = raw_input(SKIP_PROMPT)
+                if choice == "n":
+                    LOG.info("Stopping workflow as requested")
+                    ret_val = 2
+                elif choice == "s":
+                    ret_val = 1
+                    # Now find out whether to skip all tasks on
+                    # this server
+                    for host in task.getHosts():
+                        choice = ""
+                        prompt = SKIP_SERVER_PROMPT.format(host.hostname)
+                        while choice != "y" and choice != "n":
+                            choice = raw_input(prompt)
+                        if choice == "y":
+                            excluded.append(host.hostname)
+        except EOFError:
+            # Input stream has ended unexpectedly, assume user done Ctrl-C
+            ret_val = 2
+        except IOError as e:
+            if e.errno != errno.EINTR:
+                # IOError is not an interrupt - so not Ctrl-C
+                raise
+            else:
                 ret_val = 2
-            elif choice == "s":
-                ret_val = 1
-                # Now find out whether to skip all tasks on
-                # this server
-                for host in task.getHosts():
-                    choice = ""
-                    prompt = SKIP_SERVER_PROMPT.format(host.hostname)
-                    while choice != "y" and choice != "n":
-                        choice = raw_input(prompt)
-                    if choice == "y":
-                        excluded.append(host.hostname)
         return ret_val
 
     def askContinue(self, wfstatus):
         """Asks user whether to continue or not, details of question to ask
            are in wfstatus object.
-           Arguments:
+
+           Args:
                wfstatus:  WorkflowStatus object with details of question
            Returns:
-               True if should continue, False otherwise
+               boolean: True if should continue, False otherwise
         """
         run = True
         val = None
-        while not wfstatus.isValidResponse(val):
-            val = raw_input(wfstatus.user_msg)
-            if wfstatus.isStopResponse(val):
+        try:
+            while not wfstatus.isValidResponse(val):
+                val = raw_input(wfstatus.user_msg)
+                if wfstatus.isStopResponse(val):
+                    run = False
+        except EOFError:
+            # Input stream has ended unexpectedly, assume user done Ctrl-C
+            run = False
+        except IOError as e:
+            if e.errno != errno.EINTR:
+                # IOError is not an interrupt - so not Ctrl-C
+                raise
+            else:
                 run = False
         return run
 
     def getVersion(self, htype, host):
         """ Asks user what version host is at
-            Arguments:
+
+            Args:
                 host:  Name of host to get version from
                 htype: Type of version, software or OS
             Returns:
@@ -93,7 +121,8 @@ class DynamicMenuMgr(object):
     def getDynamicAlteration(self, wfsys, msgs):
         """ interactively obtains the details for the dynamic pause/esc
             alteration
-            Arguments:
+
+            Args:
                 wfsys: the workflow
                 msgs: list to hold messages to be displayed to user
             Returns:
@@ -147,7 +176,8 @@ class DynamicMenuMgr(object):
     def getDynamicAddition(self, resDict, dyntype, wfsys):
         """ interactively obtains the details for the dynamic pause/esc
             addition
-            Arguments:
+
+            Args:
                 resdict: a dictionary to hold the addition details
                 dyntype: specifies whether this is a pause or an escape
                 wfsys: workflow sys object used in validation
@@ -225,7 +255,8 @@ class DynamicMenuMgr(object):
 
     def getDynamicRemoval(self, resDict, dyntype, wfsys):
         """ interactively obtains the details for the dynamic pause/esc removal
-            Arguments:
+
+            Args:
                 resdict: a dictionary to hold the addition details
                 dyntype: specifies whether this is a pause or an escape
                 wfsys: workflow sys object used in validation
@@ -291,11 +322,12 @@ class DynamicMenuMgr(object):
 
     def acceptExistingEntry(self, resDict, entryKey):
         """ allows us to accept existing entry on an edit
-        Arguments:
+
+        Args:
             resDict: the dictionary containing entries so far
             entryKey: the key of the existing entry to offer
         Returns:
-            True if user accepts the entry
+            boolean: True if user accepts the entry
             False if the user rejects the entry
             False if there is no existing entry
         """
@@ -318,7 +350,8 @@ class DynamicMenuMgr(object):
 
     def dynAddHostAndServer(self, resDict, dyntype, wfsys):
         """handles input of host and server, for which values are co-dependent
-           Arguments:
+
+           Args:
                resDict: the dictionary of entered fields being built
                dyntype: type of msgTask (pause or escape)
                wfsys: the current workflow - used in validation
@@ -352,15 +385,17 @@ class DynamicMenuMgr(object):
            if present
            Note that for hosts and server the validation here is only for
            free text - further validation is applied in dynAddHostAndServer
-           Arguments:
+
+           Args:
                resDict: the dictionary of entered fields being built
                fieldKey: the key of the current entry
                fieldPrompt: the prompt for this field
                dyntype: type of msgTask (pause or escape)
                wfsys: the current workflow - used in validation
            Returns:
-               True if field value entered, False if getRawInput returned False
-                    (which indicates that a quit (q) was entered), or
+               boolean: True if field value entered, False if getRawInput
+                     returned False
+                     (which indicates that a quit (q) was entered), or
                      the field was unrecognise (which should never happen)
         """
         if not self.acceptExistingEntry(resDict, fieldKey):
@@ -476,7 +511,8 @@ class DynamicMenuMgr(object):
 
     def displayErrors(self, msgs):
         """ displays errors from msgs list
-            Arguments:
+
+            Args:
                 msgs: list of errors
             Returns:
                 n/a
@@ -490,7 +526,8 @@ class DynamicMenuMgr(object):
 
     def getDetails(self, resDict, dyntype):
         """ formats the new msgTask details as a string for display to user
-            Arguments:
+
+            Args:
                 reDict: dictionary of the msgTask details entered
                 dyntype: which kind of dynamic task this is (pause or escape)
             Returns:
@@ -526,11 +563,12 @@ class MenuMgr(object):
 
     def getOptions(self, options, err_msg=""):
         """ Get menu options, and populate options object
-            Arguments:
+
+            Args:
                 options: WorkflowOptions
                 err_msg: error message to display
             Returns:
-                True if ok, False if should quit
+                boolean: True if ok, False if should quit
         """
         utils.outputTitleLines("WORKFLOW ENGINE", err_msg,
                                self.term_size, HYPHEN_LINE)
@@ -539,7 +577,7 @@ class MenuMgr(object):
         print " [2] Run pre-checks"
         print " [3] Run execute workflow"
         print " [4] Run post-checks"
-        print " [5] Run single workflow task"
+        print " [5] Run named tasks"
         print " [6] Run tagged set of tasks"
         print " [7] Edit Workflow Engine options"
         choice = raw_input("\nPlease select your option or q to quit:\n")
@@ -562,9 +600,11 @@ class MenuMgr(object):
             options.phase = constants.OPT_POSTCHECK
             return self.getMenuPhase(options)
         elif val == 5:
-            options.task = self.getMenuSingleTask()
+            options.unparsed_task = self.getMenuTaskList()
+            if options.unparsed_task != None:
+                options.task = utils.split_commas(options.unparsed_task)
             options.phase = constants.OPT_POSTCHECK
-            return self.getMenuSingleTaskServers(options,
+            return self.getMenuTaskListServers(options,
                                   "task {0}".format(options.task))
         elif val == 6:
             # TODO: If run tag should also run postcheck or not by default?
@@ -657,29 +697,30 @@ class MenuMgr(object):
             servers = choice
         return servers
 
-    def getMenuSingleTask(self, err_msg=""):
-        """ Display menu for choosing a single task and server"""
-        LOG.debug("Getting task id")
-        utils.outputTitleLines("WORKFLOW ENGINE - Select task", err_msg,
+    def getMenuTaskList(self, err_msg=""):
+        """ Display menu for choosing a task list and server"""
+        LOG.debug("Getting task id/s")
+        utils.outputTitleLines("WORKFLOW ENGINE - Select tasks", err_msg,
                                self.term_size, HYPHEN_LINE)
-        task = raw_input("\nEnter id of task to use\n")
+        task = \
+            raw_input("\nEnter comma-separated list of the task ids to use\n")
         return task
 
-    def getMenuSingleTaskServers(self, options, err_msg=""):
-        """ Displays sub-menu to determine whether to run task on
+    def getMenuTaskListServers(self, options, err_msg=""):
+        """ Displays sub-menu to determine whether to run tasks on
             all servers, or selected servers"""
         utils.outputTitleLines("WORKFLOW ENGINE - {0}".format(options.task),
                                err_msg, self.term_size, HYPHEN_LINE)
         # if we are using the menu then we cannot be using --list
         print " [1] Run {0} on all servers".format(options.task)
-        print " [2] Run {0} on selected servers".format(options.task)
+        print " [2] Run {0} on selected servers".format(options.unparsed_task)
         LOG.debug("Requesting further details for {0} task".\
-                                                  format(options.task))
+                                                format(options.unparsed_task))
         choice = raw_input("\nPlease select your option or q to quit:\n")
         if choice == "q":
             return False
         if not utils.digit_in_range(choice, 2):
-            return self.getMenuSingleTaskServers(options, \
+            return self.getMenuTaskListServers(options, \
                           "Invalid option {0}".format(choice))
         val = int(choice)
         if val == 1:
@@ -724,11 +765,12 @@ class MenuMgr(object):
 
     def getEditPhaseName(self, is_info, err_msg=""):
         """ Asks user which phase want to change info or error tag for
-            Arguments:
+
+            Args:
                 is_info: True if changing info tag, False if error
                 err_msg: Whether error message to display
             Returns:
-                True if set parameter, else False
+                boolean: True if set parameter, else False
         """
         if is_info:
             tagname = "information"
@@ -763,11 +805,12 @@ class MenuMgr(object):
 
     def setParameter(self, description, cfgparam):
         """ Asks and sets parameter in the wfconfig dictionary
-            Arguments:
+
+            Args:
                 description: text to display when asking for param value
                 cfgparam: name of parameter in wfconfig dict to set
             Returns:
-                True if set parameter
+                boolean: True if set parameter
                 False if user didn't want to set parameter
         """
         choice = raw_input(
@@ -826,9 +869,13 @@ class MenuMgr(object):
 
     def getMenuTag(self, options, err_msg=""):
         """ Displays sub-menu to get tag to run
+
+            Args:
+                options: options chosen
+                err_msg: current error message to display
             Returns:
-                True if entered tag
-                False if want to quit"""
+                boolean: True if entered tag, False if want to quit
+        """
         utils.outputTitleLines("WORKFLOW ENGINE - Select tag",
                                err_msg, self.term_size, HYPHEN_LINE)
         # if we are using the menu then we cannot be using --list

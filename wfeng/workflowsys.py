@@ -1,7 +1,6 @@
 """ Module represents the classes representing a workflow applied to a set
     of hosts
-@copyright: Ammeon Ltd
-"""
+    @copyright: Ammeon Ltd """
 from wfeng.task import FabricTaskManager, FabricStatusTask
 from wfeng.task import WorkflowStatus
 from wfeng.task import TagTask, ParallelTask, ParallelStatusTask, SequenceTask
@@ -62,16 +61,27 @@ class WorkflowSystem:
                                                      self.execute,
                                                      self.postcheck]
         self.failed = False
+        self.trapped = False
+
+    def interrupt_handler(self, signal, frame):
+        """ Output that Ctrl C has been caught"""
+        # NB both the main process and sub processes will have this
+        # interrupt handler. Therefore the sub processes's wfsys will
+        # be updated as well as the main one. Therefore no special signalling
+        # is required between the main and child threads
+        print "INTERRUPT CAUGHT - Engine will stop when running tasks " \
+                 "have finished"
+        self.trapped = True
 
     def isEquivalent(self, wsys):
         """ Compares this workflow system with that described by sys, and
             if they are the same ignoring status and ignoring dynamic pauses
             and dynamic escapes then they are equivalent
-            Arguments:
+
+            Args:
                 wsys: WorkflowSystem to compare against
             Returns:
-                True: if same ignoring status
-                False: if different
+                boolean: True if same ignoring status, False if different
         """
         if self.name != wsys.name:
             log.debug("Names on Workflows differ: %s/%s" %
@@ -134,10 +144,11 @@ class WorkflowSystem:
 
     def load(self, filename, hosts):
         """ Reads filename to get running status
-            Arguments:
+
+            Args:
                 filename: workflowstatus file from previous run
                 hosts: hosts list
-            Returns: True if loaded ok, False otherwise
+            Returns: boolean: True if loaded ok, False otherwise
         """
         schema_file = constants.WORKFLOW_XSD
         xmlschema_doc = etree.parse(schema_file)
@@ -159,13 +170,13 @@ class WorkflowSystem:
 
     def _parsePhase(self, phase, element, hosts):
         """Parses a phase of workflowsys, with taskstatus items
-           Arguments:
+
+           Args:
                phase: list to hold any tasks found
                element: the element holding this phase, e.g. display
                hosts: hosts file read in
            Returns:
-               True if parsed correctly
-               False if failed
+               boolean: True if parsed correctly, False if failed
         """
         phasename = element.tag
         log.log(constants.TRACE, "Loading phase %s" % phasename)
@@ -288,7 +299,8 @@ class WorkflowSystem:
     def _parseTaskStatus(self, child, phasename, hosts):
         """ Extracts details from taskstatus element and returns a
             FabricStatusTask element.
-            Arguments:
+
+            Args:
                 child: TaskStatus element
             Returns:
                 FabricStatusTask
@@ -328,10 +340,11 @@ class WorkflowSystem:
 
     def taskInWorkflow(self, taskid):
         """ Returns whether taskid is in workflow
-            Arguments:
+
+            Args:
                 taskid: ID of task to lookup
             Returns:
-                True if found, else False
+                boolean: True if found, else False
         """
         for phase in self.phasesToRun[constants.OPT_POSTCHECK]:
             if phase.getTask(taskid) is not None:
@@ -340,10 +353,11 @@ class WorkflowSystem:
 
     def refIdInWorkflow(self, taskid):
         """ Returns whether taskid is in workflow
-            Arguments:
+
+            Args:
                 taskid: ID of task to lookup
             Returns:
-                True if found, else False
+                boolean: True if found, else False
         """
         for phase in self.phasesToRun[constants.OPT_POSTCHECK]:
             if phase.getTask(taskid) is not None:
@@ -352,17 +366,18 @@ class WorkflowSystem:
 
     def tagInWorkflow(self, tag):
         """ Returns whether tag is in workflow
-            Arguments:
+
+            Args:
                 tag: ID of tag to lookup
             Returns:
-                True if found, else False
+                boolean: True if found, else False
         """
         if self.execute.getTag(tag) is not None:
             return True
         return False
 
     def eligibleDisplayTasks(self, servertypes, servernames, excluded,
-                                   force, exact_match):
+                                   force, version_checker):
         """ returns True if there are non-completed eligible tasks in this
             phase, or False if there are none"""
         # split the excluded string into a list
@@ -373,11 +388,11 @@ class WorkflowSystem:
             if dtask.isParallelStatusTask():
                 if not dtask.sequenceNoneToRun(servertypes, servernames,
                             excludes,
-                            input, force, exact_match):
+                            input, force, version_checker):
                     return True
             else:
                 if dtask.shouldRunOnHost(servertypes, servernames, excludes,
-                            input, force, exact_match):
+                            input, force, version_checker):
                     # if task status is not in SUCCESS_STATUSES then it
                     # could be eligible for run
                     if not dtask.status in constants.SUCCESS_STATUSES:
@@ -386,7 +401,8 @@ class WorkflowSystem:
 
     def getExecutePhase(self):
         """ returns execute phase of workflow
-            Arguments:
+
+            Args:
                 none
             Return:
                 phase - ie list of tasks
@@ -395,7 +411,8 @@ class WorkflowSystem:
 
     def getTask(self, taskid):
         """ Returns task
-            Arguments:
+
+            Args:
                 taskid: ID of task to lookup
             Returns:
                 WTask object or None if not found
@@ -419,7 +436,8 @@ class WorkflowSystem:
 
     def process(self, term_size, options):
         """ Process workflow defined here
-            Arguments:
+
+            Args:
                 term_size: Terminal size
                 options: WorkflowOptions object
             Returns:
@@ -454,21 +472,17 @@ class WorkflowSystem:
 
                     if numFailed > 0:
                         self.failed = True
-                    # If this is single-task and phase contained our task
-                    if options.task is not None and \
-                              phase.getTask(options.task) is not None:
-                        log.debug("STOPPING workflow as ran chosen task")
-                        if self.failed and not options.list:
-                            return WorkflowStatus(WorkflowStatus.FAILED,
-                                WORKFLOW_FINISHED_LINE)
-                        else:
-                            return WorkflowStatus(WorkflowStatus.COMPLETE,
-                                 WORKFLOW_FINISHED_LINE)
+                    singleTask = None
+                    listlen = 0
 
                     # Determine if exited phase in middle, and not for
                     # user input
                     if not options.list and not carry_on:
-                        if self.failed:
+                        if self.trapped:
+                            # Finished early due to interrupt
+                            return WorkflowStatus(WorkflowStatus.FAILED,
+                               "STOPPING due to interrupt")
+                        elif self.failed:
                             # Finished phase early with failure
                             log.debug("Finished early with one or more "
                                       "failure")
@@ -479,6 +493,47 @@ class WorkflowSystem:
                             log.debug("Finished early with no failures")
                             return WorkflowStatus(WorkflowStatus.COMPLETE,
                                "STOPPING as requested")
+
+                    # if we have not stopped already then check whether we
+                    # should stop due to tasklist exhausted.
+                    # If running specified task(s) and none of the tasks are
+                    # in subsequent phases then we have finished
+                    if options.task is not None:
+                        listlen = len(options.task)
+                        if listlen == 1:
+                            singleTask = options.task[0]
+                            log.debug("Single task is %s" % singleTask)
+                            if phase.getTask(singleTask) is not None:
+                                log.debug("STOPPING workflow as " \
+                                            "ran chosen task")
+                                if self.failed and not options.list:
+                                    return WorkflowStatus(\
+                                        WorkflowStatus.FAILED,
+                                         WORKFLOW_FINISHED_LINE)
+                                else:
+                                    return WorkflowStatus(\
+                                        WorkflowStatus.COMPLETE,
+                                         WORKFLOW_FINISHED_LINE)
+                        else:
+                            log.debug("Checking for tasks in later phases")
+                            all_done = True
+                            # check whether any tasks are in subsequent phases
+                            for t in options.task:
+                                for p in range(i + 1, numPhases):
+                                    if self.phasesToRun[options.phase][p].\
+                                                   getTask(t) is not None:
+                                        all_done = False
+                            if all_done:
+                                log.debug("STOPPING workflow "\
+                                          "- no tasks in later phases")
+                                if self.failed and not options.list:
+                                    return WorkflowStatus(\
+                                        WorkflowStatus.FAILED,
+                                         WORKFLOW_FINISHED_LINE)
+                                else:
+                                    return WorkflowStatus(\
+                                        WorkflowStatus.COMPLETE,
+                                         WORKFLOW_FINISHED_LINE)
 
                     # Completed phase so increment currentPhase
                     self.currentPhase = self.currentPhase + 1
@@ -514,6 +569,255 @@ class WorkflowSystem:
             return WorkflowStatus(WorkflowStatus.COMPLETE,
                             WORKFLOW_FINISHED_LINE)
 
+    def processManualReset(self, o):
+        """ work through phase tasks processing manual reset
+            NB
+            Args:
+                o: parameters
+                phase: phase in which manual changes are to take place
+            Returns:
+                boolean: True if processed ok, else False
+        """
+        log.debug("process manual reset")
+        phaselist = []
+        phaselist.append(self.execute)
+        startindex = 0
+        endindex = 0
+
+        for phase in phaselist:
+            log.debug("Processing reset for phase {0}".\
+                     format(phase.name))
+            numTasksInPhase = len(phase.tasks)
+
+            if o.tag != None and o.tag != "":
+                tagindex = phase.getTag(o.tag)
+                if tagindex == None:
+                    log.info("Tag {0} not found in {1} phase".\
+                               format(o.tag, phase.name))
+                    return constants.R_ERROR
+                else:
+                    endindex = tagindex
+                    log.debug("tag found - index {0}".format(tagindex))
+                    ind = tagindex
+                    while ind < numTasksInPhase:
+                        if phase.tasks[ind].task.isTag() and \
+                           not phase.tasks[ind].task.is_start:
+                            # we have found the end of the tag
+                            startindex = ind - 1
+                            # exit the while loop
+                            break
+                        ind = ind + 1
+                    if ind == numTasksInPhase:
+                        log.debug("End of tag {0} not found - assume "\
+                                  "end of phase is end of tag. ind={1}".\
+                                  format(o.tag, ind))
+                        startindex = ind - 1
+                if not self.resetCandidates(o, phase, startindex, endindex):
+                    log.error("\nStatus of dependent task(s) " \
+                                  "prevent tag reset")
+                    return constants.R_DEPENDENCY_CONFLICT
+
+            if o.task != None and o.task != []:
+                log.debug("processing task list")
+                startindex = numTasksInPhase - 1
+                endindex = 0
+                if not self.resetCandidates(o, phase, startindex, endindex):
+                    log.error("\nStatus of dependent task(s) " \
+                              "prevent task(s) reset")
+                    return constants.R_DEPENDENCY_CONFLICT
+            return constants.R_OK
+
+    def resetCandidates(self, o, executePhase, startindex, endindex):
+        """ reverse through a range of tasks resetting candidates
+        Args:
+            o: parameters
+            executePhase: the execute phase of the workflow
+            startindex: the index at which to start iteration
+            endindex: the index at which to end iteration
+        Returns:
+            boolean: False if dependency error encountered, otherwise True
+        """
+        ret = True
+        updatedTasks = []
+        updatesInfo = []
+        log.debug("reset candidates")
+        ind = startindex
+        while ind >= endindex:
+            # if this is a parallel task then we need to reverse through
+            # it
+            tasktocheck = executePhase.tasks[ind]
+            log.debug("Assessing task %s at ind %s for reset" % \
+                          (tasktocheck.task.name, ind))
+            if tasktocheck.task.isParallel():
+                log.debug("task is a parallel")
+                # get the tasks from the sequences
+                # need to iterate tasks in reverse order
+                for s in reversed(tasktocheck.sequences):
+                    for t in reversed(s.tasks):
+                        candidateReset = self.resetCandidate(o, executePhase, \
+                                   t, s, updatesInfo, updatedTasks)
+                        if not candidateReset:
+                            ret = False
+            else:
+                candidateReset = self.resetCandidate(o, executePhase, \
+                        tasktocheck, None, updatesInfo, updatedTasks)
+                if not candidateReset:
+                    ret = False
+            ind = ind - 1
+
+        if len(updatesInfo) > 0:
+            log.info("\n")
+            for i in updatesInfo:
+                log.info("{0}".format(i))
+
+        if len(updatedTasks) > 0:
+            if ret:
+                log.info("\nThe following tasks are eligible for reset:\n")
+                for u in updatedTasks:
+                    log.info("{0}".format(u))
+            else:
+                log.debug("\nThe following tasks are eligible for reset:\n")
+                for u in updatedTasks:
+                    log.debug("{0}".format(u))
+        else:
+            log.info("\nNo tasks are eligible for reset")
+        return ret
+
+    def resetCandidate(self, o, executePhase, tasktocheck, sequence,
+                                                  updatesInfo, updatedTasks):
+        """ process single task reset candidates
+        Args:
+            o: parameters
+            executePhase: the execute phase of the workflow
+            tasktochedk: the task we are processing
+            sequence: sequence if tasktocheck is in parallel, else None
+            updatesInfo: list of update info msgs - to be appended to as needed
+            updatedTasks: list of updates - to be appended to as needed
+        Return:
+            boolean: False if dependency conflict, otherwise True
+        """
+        taskid = tasktocheck.task.name
+        hostname = "unknown"
+        if tasktocheck.host != None:
+            hostname = tasktocheck.host.hostname
+
+        resettask = True
+        if o.task != None and taskid not in o.task:
+            log.debug("taskid %s is not in task list" % taskid)
+            resettask = False
+        if tasktocheck.task.isTag():
+            resettask = False
+
+        if resettask:
+
+            log.debug("considering task %s on server %s" % (taskid, \
+                                                                     hostname))
+            candidate = self.serverOkForManualReset(executePhase, \
+                                                             tasktocheck, o)
+
+            if candidate:
+
+                if tasktocheck.status in \
+                                        constants.INIT_STATUSES:
+                    updatesInfo.insert(0,
+                          "Task {0} on {1} will not be reset as it is has " \
+                                 "{2} status".format(\
+                              taskid, \
+                              hostname, \
+                              tasktocheck.status))
+                    return True
+
+                dependents = []
+                ex = self.execute.getDependencyConflictsByStatus(
+                           taskid, hostname,
+                           constants.INIT_STATUSES, sequence)
+                post = self.postcheck.getDependencyConflictsByStatus(
+                           taskid, hostname,
+                           constants.INIT_STATUSES, sequence)
+                dependents = dependents + ex + post
+                dependentsError = False
+                if dependents != []:
+                    dependentscsv = ",".join(dependents)
+                    log.debug("Dependent(s) {0} that are not in " \
+                                  "initial, skipped or reset state " \
+                                  "found for task {1}".\
+                              format(dependentscsv, taskid))
+                    dependentsError = True
+                    if o.force:
+                        status = WorkflowStatus(WorkflowStatus.USER_INPUT,
+                             "Are you sure you want to force manual reset " \
+                             "for task {0} on {1} when task(s) ({2}) are in " \
+                             "completed/started state? Continue (y/n):\n".\
+                                   format(taskid,
+                                         tasktocheck.host.hostname,
+                                         dependentscsv))
+                        if self.input.askContinue(status):
+                            log.info("Force manual reset confirmed")
+                            dependentsError = False
+                        else:
+                            log.info("Force manual reset cancelled")
+                    if dependentsError:
+                        updatesInfo.insert(0,
+                            "Completed/started dependent(s) ({0}) prevent " \
+                            "manual reset for task {1} on {2}".\
+                                   format(dependentscsv, taskid, hostname))
+                        return False
+
+                if not dependentsError:
+                    updatesInfo.insert(0, "Resetting task {0} on {1} " \
+                                 "will change status from " \
+                                 "{2} to {3}".format(\
+                              taskid, hostname, \
+                              tasktocheck.status, \
+                              constants.MANUAL_RESET))
+                    updatedTasks.insert(0, "Task id: %s on server %s" % \
+                                   (taskid, hostname))
+                    tasktocheck.status = constants.MANUAL_RESET
+
+        return True
+
+    def serverOkForManualReset(self, phase, tasktocheck, o):
+        """ assess whether server is valid for manual fix/reset according to
+            the input params
+            Args:
+                phase: the phase being processed
+                tasktocheck: the phase task being processed
+                o: the parameters
+            Returns: True if task matches the server criteria, otherwise False
+        """
+        okservertype = False
+        okservername = False
+        if o.servertypes != [constants.ALL]:
+            for servertype in o.servertypes:
+                if tasktocheck.host.servertype == servertype:
+                    okservertype = True
+        else:
+            okservertype = True
+
+        if o.servernames != [constants.ALL]:
+            for servername in o.servernames:
+                if tasktocheck.host.hostname == servername:
+                    okservername = True
+        else:
+            okservername = True
+
+        candidate = True
+        if okservertype and okservername:
+            log.debug("server ok according to servertype/servername")
+            if o.exclude != None:
+                excludes = []
+                # Now strip of spaces
+                excludes = [x.strip() for x in o.exclude.split(',')]
+                for excludedServer in excludes:
+                    if tasktocheck.host.hostname == excludedServer:
+                        log.debug("server in exclusion list")
+                        candidate = False
+        else:
+            log.debug("server not ok for servertype/servername")
+            candidate = False
+
+        return candidate
+
 
 class WorkflowPhase:
     """
@@ -522,7 +826,8 @@ class WorkflowPhase:
 
     def __init__(self, name, wfsys, alwaysRun=False, askSkip=False):
         """ Initialises the workflow phase.
-            Arguments:
+
+            Args:
                 name: name of phase
                 wfsys: WorkflowSystem instance that phase is part of
                 alwaysRun: if true, then will always run tasks in phase, even
@@ -562,7 +867,8 @@ class WorkflowPhase:
     def insertDynamicIntoGroup(self, task, hosts, inds, position, menuMsgs):
         """ Insert task and host from a particular index position to the
             workflow with INITIAL state
-            Arguments:
+
+            Args:
                 task: the task to insert
                 hosts: the hosts object to determine which hosts to expand to
                 inds: list of indices of the reference task expanded instances
@@ -656,13 +962,14 @@ class WorkflowPhase:
     def insertDynamic(self, task, hosts, ind, menuMsgs):
         """ Insert task and host from a particular index position to the
             workflow with INITIAL state
-            Arguments:
+
+            Args:
                 task: the task to insert
                 hosts: the hosts object to determine which hosts to expand to
                 ind: the index from which the expanded tasks are to be inserted
                 menuMsgs: list to hold messages for display during interaction
             Returns:
-                booolean: True if inserted ok, else False
+                boolean: True if inserted ok, else False
                 """
         if ind > (len(self.tasks) + 1):
             menuMsgs.append("Invalid index (%s) for insertion of " \
@@ -699,7 +1006,8 @@ class WorkflowPhase:
 
     def removeDynamic(self, dyntaskid, dyntype, menuMsgs):
         """ Remove dynamic task from workflow by id
-            Arguments:
+
+            Args:
                 dyntaskid: the id of the dynamic task to be removed
                 dyntype: constants.DYNAMIC_ESCAPE or constants.DYNAMIC_PAUSE
                 menuMsgs: list to hold messages for display during interaction
@@ -741,11 +1049,11 @@ class WorkflowPhase:
     def isEquivalent(self, phase):
         """ Compares this workflow phase with that described by phase, and
             if they are the same ignoring status then they are equivalent
-            Arguments:
+
+            Args:
                 phase: WorkflowPhase to compare against
             Returns:
-                True: if same ignoring status
-                False: if different
+                boolean: True if same ignoring status, False if different
         """
         if self.name != phase.name:
             log.debug("Names on Phase differ: %s/%s" %
@@ -784,7 +1092,7 @@ class WorkflowPhase:
                 i = i + 1
         # now progress thru any phase tasks which are beyond the self.tasks
         while i < len(phase.tasks):
-            if phase.tasks[i].task.isDynamic:
+            if phase.tasks[i].task.isDynamic():
                 dynamic_tasks_in_phase = dynamic_tasks_in_phase + 1
             else:
                 log.debug("Unmatched non-dynamic task %s in phase" % \
@@ -805,7 +1113,8 @@ class WorkflowPhase:
 
     def getTask(self, taskid):
         """ Returns WTask object if its in phase
-            Arguments:
+
+            Args:
                 taskid: ID of task to lookup
             Returns:
                 WTask if found or None if not found
@@ -821,38 +1130,114 @@ class WorkflowPhase:
 
     def hasDependentsOnTask(self, taskid):
         """ Identifies whether phase has any tasks dependent on taskid
-            NB
-            Arguments:
+
+            Args:
                 taskid: ID of task to lookup
             Returns:
                 boolean: True if dependents found, else False
         """
         for task in self.tasks:
-
+            inParallel = False
             if task.isParallelStatusTask():
                 # get the tasks from the sequences
+                inParallel = task.task.name
                 seqtasks = []
                 for s in task.sequences:
                     for t in s.tasks:
                         if not t.task.isTag():
                             if t.task.dependency is not None:
-                                dependencies = t.task.dependency.split(',')
+                                dependencies = \
+                                     utils.split_commas(t.task.dependency)
                                 for dep in dependencies:
                                     if dep == taskid:
                                         return True
             else:
                 if not task.task.isTag():
                     if task.task.dependency is not None:
-                        dependencies = task.task.dependency.split(',')
+                        dependencies = \
+                                     utils.split_commas(task.task.dependency)
                         for dep in dependencies:
                             if dep == taskid:
                                 return True
         return False
 
+    def getDependencyConflictsByStatus(self, targetTask, hostname, \
+                                           statusList, sequence):
+        """ Identifies whether phase has any tasks dependent on targetTask for
+            which the status is NOT in the supplied statusList
+            NB
+            Args:
+                targetTask: ID of task whose dependencies we are checking
+                hostname: the host on which the target task is to run
+                statusList: list of status values
+                sequence: sequence if targetTask in parallel, otherwise None
+            Returns:
+                [] : matchingDependents - list of completed dependents found
+        """
+        matchingDependents = []
+        intraParallel = False
+        for task in self.tasks:
+
+            if task.isParallelStatusTask():
+                # get the tasks from the sequences
+                #  no need to iterate tasks in reverse order
+                for s in task.sequences:
+                    for t in s.tasks:
+                        if self.dependencyConflict(t, targetTask,
+                                         hostname, statusList, sequence):
+                            matchingDependents.append("%s on %s" \
+                                                        % (t.task.name,\
+                                                          t.host.hostname))
+            else:
+                if self.dependencyConflict(task, targetTask,
+                                     hostname, statusList, None):
+                    matchingDependents.append("%s on %s" \
+                                           % (task.task.name, \
+                                              task.host.hostname))
+
+        log.debug("MatchingDependents : %s" % matchingDependents)
+        return matchingDependents
+
+    def dependencyConflict(self, task, targetTask, hostname, \
+                      statusList, checksequence):
+        """ identify whether this task depends on the target task and has a
+            status which is NOT included in statusList
+            Note that if the task and targetTask are in the same parallel
+            then the the dependency is forced to depend on single server
+            Args:
+                task: the dependent task
+                targetTask: the task whose dependents we are checking
+                hostname: the host on which the target task is to run
+                statusList: a list of statuses which are NOT conflicting
+                checksequence: sequence if we need to check whether task
+                and targetTask are in the same parallel, else None
+            Returns:
+                boolean: True if dependent has conflicting status, else False
+        """
+        ret = False
+
+        if not task.task.isTag():
+            if task.task.dependency is not None:
+                dependencies = utils.split_commas(task.task.dependency)
+                for dep in dependencies:
+                    if dep == targetTask:
+                        if task.status not in statusList:
+                            intraParallel = False
+                            if checksequence != None:
+                                if checksequence.hasTask(task.task.name):
+                                    intraParallel = True
+                            if task.task.depsinglehost or intraParallel:
+                                if task.host.hostname == hostname:
+                                    ret = True
+                            else:
+                                ret = True
+        return ret
+
     def getTaskTopLevelInd(self, taskId):
         """ get the index of the first instance of this task or index
-           of enclosing parallel
-            Arguments:
+            of enclosing parallel
+
+            Args:
                  taskid: ID of task to lookup
             Returns:
                  returns index first task with this id, or of enclosing
@@ -874,7 +1259,8 @@ class WorkflowPhase:
     def getTaskIndices(self, taskId):
         """ Returns the indices for instances of a given task
             within master status so long as it is not within a parallel
-            Arguments:
+
+            Args:
                  taskid: ID of task to lookup
             Returns:
                  returns a dictionary containing list of indices TASK_LIST
@@ -899,7 +1285,8 @@ class WorkflowPhase:
 
     def getTag(self, tag):
         """ Returns index of the start tag corresponding to tag
-            Arguments:
+
+            Args:
                 taskid: ID of task to lookup
             Returns:
                 index of start point
@@ -911,7 +1298,8 @@ class WorkflowPhase:
 
     def getTaskStatus(self, taskid, hosts):
         """ Returns WTask object status if its present
-            Arguments:
+
+            Args:
                 taskid: ID of task to lookup
                 hosts: hostname to lookup for or ALL
             Returns:
@@ -952,7 +1340,8 @@ class WorkflowPhase:
     def process(self, term_size, excluded,
                       sysfilename, options):
         """ Process workflow defined here
-            Arguments:
+
+            Args:
                 term_size: Terminal size
                 excluded: List of servers not to run on
                 sysfilename: So can write status file after each task
@@ -964,6 +1353,7 @@ class WorkflowPhase:
         else:
             run_str = "RUNNING"
         phaseoutput = "{0} PHASE: {1}".format(run_str, self.name)
+
         lines = "-" * len(phaseoutput)
         phaseoutput = phaseoutput.center(term_size)
         lines = lines.center(term_size)
@@ -992,6 +1382,10 @@ class WorkflowPhase:
             run_on_server = True
             list_skip_reason = constants.SKIPPED
             list_skip_colour = constants.COLOURS.status[constants.SKIPPED]
+            if self.wfsys.trapped:
+                log.debug("Finishing for loop as interrupt has been caught")
+                carry_on = False
+                break
             if only_run_escape:
                 # Only process subsequent escapes
                 if not isinstance(a, EscapeStatusTask):
@@ -1018,10 +1412,16 @@ class WorkflowPhase:
                 list_skip_reason = "SKIP_SUCCESS"
                 list_skip_colour = constants.COLOURS.status[constants.SUCCESS]
             elif options.task is not None:
-                if not a.containsTask(options.task):
-                    log.debug("Skipping task %s %s as task not %s" % \
+                log.debug("Checking whether task %s is in task list or " \
+                           "contains any item from task list" % \
+                             a.task.name)
+                run_on_server = False
+                for t in options.task:
+                    if a.containsTask(t):
+                        run_on_server = True
+                if run_on_server == False:
+                    log.debug("Skipping task %s %s as task not in %s" % \
                            (a.task.name, self._getHostStr(a), options.task))
-                    run_on_server = False
             elif index < startindex:
                 log.debug("Skipping task %s %s as not at start tag %s" % \
                            (a.task.name, self._getHostStr(a), options.tag))
@@ -1035,7 +1435,7 @@ class WorkflowPhase:
                 # whether to run or not
                 run_on_server = a.shouldRunOnHost(options.servertypes,
                        options.servernames, excluded, self.wfsys.input,
-                       options.force, options.exact_match)
+                       options.force, options.version_checker)
                 if a.status == constants.REACHED_VERSION or \
                    a.status == constants.PARAM_NOTMATCH:
                     list_skip_reason = "SKIP_%s" % (a.status)
@@ -1046,7 +1446,7 @@ class WorkflowPhase:
                 hostsToCheck = constants.ALL
                 # Check passed on all hosts unless both this task and
                 # dependency are in the same group
-                dependencies = a.task.dependency.split(",")
+                dependencies = utils.split_commas(a.task.dependency)
                 for dep in dependencies:
                     depTask = self.wfsys.getTask(dep)
                     # dependency may be None if we've not run the dependency
@@ -1092,15 +1492,14 @@ class WorkflowPhase:
                 # But we have decided its not relevant for our host
                 # Then we must stop and not process it
                 log.log(constants.TRACE,
-                        "Only carrying on to see if more escapes, found {0}" +\
-                        " which will not run, so stopping".format(a.task.name))
+                      "Only carrying on to see if more escapes, found {0}" +\
+                      " which will not run, so stopping".format(a.task.name))
                 carry_on = False
                 break
 
             # if this is a parallel task then we need to split out into
             # tasks in order to assess whether any are due, and for
             # --list command to assess what to display
-
             if run_on_server:
                 if self.askSkip and a.askSkip() and \
                           not options.list and not options.fix:
@@ -1111,7 +1510,7 @@ class WorkflowPhase:
                         parallelComplete = a.sequenceNoneToRun(
                                  options.servertypes, options.servernames,
                                  excluded, self.wfsys.input,
-                                 options.force, options.exact_match)
+                                 options.force, options.version_checker)
 
                     if (not (options.yes and \
                             not isinstance(a, PauseStatusTask))
@@ -1127,7 +1526,7 @@ class WorkflowPhase:
                     tasks = a.listTasks(options.servertypes,
                                  options.servernames,
                                  excluded, self.wfsys.input,
-                                 options.force, options.exact_match)
+                                 options.force, options.version_checker)
                     # Returns a list of tuples of task, run_on_server
                     for t, r in tasks:
                         if r:
@@ -1168,7 +1567,6 @@ class WorkflowPhase:
                         hide('everything', 'aborts', 'status')
                     ):
                         disconnect_all()
-
                 if result.status == WorkflowStatus.FAILED or \
                         result.status == WorkflowStatus.STOPPED:
                     if result.status == WorkflowStatus.STOPPED and \
@@ -1191,10 +1589,15 @@ class WorkflowPhase:
                              not isinstance(a, PauseStatusTask)):
                         # Just output question and then we'll output result
                         log.info(result.user_msg)
+                        # Needed to set status for pause on automate used
+                        a.setStatus(constants.SUCCESS)
                     else:
                         if not self.wfsys.input.askContinue(result):
                             carry_on = False
                             break
+                        else:
+                            # Needed to set status for pause when answered y
+                            a.setStatus(constants.SUCCESS)
                     if result.success_msg is not None:
                         # output result if it was successful, and we asked
                         # for msg to be output
@@ -1214,7 +1617,6 @@ class WorkflowPhase:
                     if options.tag is not None and a.task.tag == options.tag:
                         # Our end tag so finish, skip from now on
                         skip_now = True
-
             # Update status file
             if options.list:
                 log.debug("Writing results of listing to %s%s" % (
@@ -1224,11 +1626,14 @@ class WorkflowPhase:
             else:
                 self.wfsys.write(sysfilename)
 
+        if self.wfsys.trapped:
+            log.debug("Finishing as interrupt has been caught")
         return self._postPhaseProcess(options.list, carry_on)
 
     def _getHostStr(self, task):
         """ Returns the hostname representation of task
-            Arguments:
+
+            Args:
                 task: StatusTask to get host from
             Returns:
                 String
@@ -1251,7 +1656,8 @@ class WorkflowPhase:
     def _postPhaseProcess(self, list_only, carry_on):
         """ Performs any checking required after running phase tasks, and
             output any summary logic
-            Arguments:
+
+            Args:
                 list_only: True if run in list_only mode
                            so don't log summary output
                 carry_on: Indicates if should continue to next phase
@@ -1272,7 +1678,8 @@ class WorkflowPhase:
 
     def _run_task(self, a, options):
         """ Runs a task
-            Arguments:
+
+            Args:
                 a: StatusTask to run remotely
                 task: None if not asked to run particular task, or
                       task id to run (used when running task within parallel)
@@ -1287,7 +1694,8 @@ class WorkflowPhase:
                            usestdout=True):
         """ Writes line to console output and log file, in way that if
             called again will update the line in place.
-            Arguments:
+
+            Args:
                 line: Line to write
                 end: If True then writes a newline character as well
                 writelog: Whether to write to log file

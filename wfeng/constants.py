@@ -40,9 +40,11 @@ SKIPPED = "SKIPPED"
 REACHED_VERSION = "REACHED_VERSION"
 PARAM_NOTMATCH = "PARAM_NOTMATCH"
 MANUAL_FIX = "MANUAL_FIX"
+MANUAL_RESET = "MANUAL_RESET"
 
 
 SUCCESS_STATUSES = [SUCCESS, REACHED_VERSION, MANUAL_FIX, PARAM_NOTMATCH]
+INIT_STATUSES = [INITIAL, MANUAL_RESET, SKIPPED]
 
 # dynamic pause and escape types
 DYNAMIC_ESCAPE = "ESCAPE"
@@ -111,6 +113,14 @@ INI_RESERVED_VARS = ["SERVERNAME", "SERVERTYPE", \
 TASK_IN_GROUP = "group"
 TASK_LIST = "tasklist"
 
+DYNAMIC_ALTERATIONS_BKPDIR = "dynamic_alteration_backups"
+MANUAL_RESET_BKPDIR = "manual_reset_backups"
+
+#return codes for manual reset processing in processManualReset
+R_OK = 0
+R_DEPENDENCY_CONFLICT = 1
+R_ERROR = 2
+
 
 class Colours:
     """ Class to represent the colours to use"""
@@ -119,6 +129,7 @@ class Colours:
     status = {SUCCESS: '\033[92m',
               FAILED: '\033[91m',
               INITIAL: '\033[93m',
+              MANUAL_RESET: '\033[93m',
               REACHED_VERSION: '\033[92m',
               PARAM_NOTMATCH: '\033[92m',
               MANUAL_FIX: '\033[92m',

@@ -19,10 +19,10 @@ class Hosts(object):
         """Parses filename to produce dictionary of hosts where key of
            dictionary is host type
 
-           Arguments:
+           Args:
                filename: Name of XML hosts file
            Returns:
-               True if parsed correctly
+               boolean: True if parsed correctly
         """
         schema_file = constants.HOSTS_XSD
         xmlschema_doc = etree.parse(schema_file)
@@ -126,13 +126,15 @@ class Host(object):
     def add_param(self, name, value, override=False):
         """ Adds parameter found from running task on this host. Does nothing
             if value is None
-            Arguments:
-                name - name of parameter
-                value - value of parameter
+
+            Args:
+                name: name of parameter
+                value: value of parameter
             Returns:
-                True if added ok
+                boolean: True if added ok,
                 False if failed to add (param already in dictionary with
-                     different value, and override not True)
+                different value, and override not True)
+
         """
         if value == None:
             return True
@@ -148,12 +150,14 @@ class Host(object):
         """ Compares this Host with that described by host, and
             returns if they are the same. Ignores the parameters which are
             dynamic and added later
-            Arguments:
+
+            Args:
                 host: Host to compare against
             Returns:
-                True: if same, ignoring parameters (as these are populated
-                                                    at runtime)
-                False: if different
+                boolean: True if same, ignoring parameters (as these are
+                populated at runtime).
+                False if different
+
         """
         if self.hostname != host.hostname:
             LOG.debug("Hosts differ {0}/{1}".format(self.hostname,

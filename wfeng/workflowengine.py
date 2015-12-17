@@ -1,6 +1,5 @@
 """Modules represents top level manager class
-@copyright: Ammeon Ltd
-"""
+@copyright: Ammeon Ltd """
 import argparse
 import logging
 import os
@@ -11,18 +10,21 @@ from wfeng import constants
 from time import sleep
 import threading
 import multiprocessing
+import signal
 
 from wfeng.workflow import Workflow
 from wfeng.wfini import WfengIni
 from wfeng.host import Hosts
 from wfeng.workflowsys import WorkflowSystem
 from wfeng.status import WorkflowStatus
-from wfeng.wfconfig import WfmgrConfig
+from wfeng.wfconfig import WfmgrConfig, SWVERSIONPLUGIN, OSVERSIONPLUGIN
+from wfeng.wfconfig import EXTRA_LOGPARAMLIST, EXTRA_LOGPARAM
 from wfeng.inputmgr import MenuMgr, DynamicMenuMgr
 from wfeng.task import FabricTask
 from wfeng import utils
 from wfeng.engformatter import WfengFormatter
-from wfeng.msgtask import EscapeTask, PauseTask, DynamicTaskValidator
+from wfeng.msgtask import EscapeTask, PauseTask, DynamicTaskValidator, MsgTask
+from wfeng.pluginmgr import PluginMgr
 
 log = logging.getLogger(__name__)
 
@@ -58,12 +60,11 @@ class WorkflowEngine:
             If specific is true then returns instance running with
             specified workfile and hostfile, else returns pid of
             any running wfeng
-            Arguments:
-                workfile - ignored unless specific is true
-                hostfile - ignored unless specific is true
-                specific - if True then return pid of wfeng instance that
-                      is with this workfile/hostfile, else return pid
-                      of any running wfeng
+
+            Args:
+                workfile: ignored unless specific is true
+                hostfile: ignored unless specific is true
+                specific: whether to return pid for a particular wfeng instance
             Returns:
                 list of pids that are running
             """
@@ -113,13 +114,11 @@ class WorkflowEngine:
         # We aren't expecting multiple to be submitted within seconds of each
         # other, so this should suffice
         sleep(1)
-
         # Has anyone altered the pid for our parameters, invalid whether or
         # not allowMultipe is False
         pids = self.getRunningPid(absw, absh, True)
         if len(pids) != 1 or pids[0] != pid:
             return True
-
         # If allowMultiple is False, then we need to know the only running
         # instanceis us
         if not allowMultiple:
@@ -138,6 +137,111 @@ class WorkflowEngine:
         file = open(filename, 'w')
         file.write("%s,%s\n" % (workfile, hostfile))
         file.close()
+
+    def _calculate_log_prefix(self, workfile, hostfile, starttime, options):
+        # Return the prefix to use for logfile, or None if cfg invalid
+        prefix = "%s_%s" % (workfile, hostfile)
+        logoptions = self.config.cfg.get(EXTRA_LOGPARAMLIST, [])
+        # Now add on any options to the filename if they are in cfg file
+        # and requested
+        for logoption in logoptions:
+            extraval = None
+            if logoption.lower() == "task":
+                extraval = options.unparsed_task
+            elif logoption.lower() == "tag":
+                extraval = options.tag
+            elif logoption.lower() == "phase":
+                # NB Phase gets set to postcheck if task is specified
+                # even though no phase is given at command line
+                if options.unparsed_task == None:
+                    extraval = options.phase
+            elif logoption.lower() == "servername":
+                if options.unparsed_servernames != constants.ALL:
+                    extraval = options.unparsed_servernames
+            elif logoption.lower() == "servertype":
+                if options.unparsed_servertypes != constants.ALL:
+                    extraval = options.unparsed_servertypes
+            elif logoption.lower() == "exclude":
+                if options.exclude != None:
+                    extraval = "exclude" + options.exclude
+            elif logoption.lower() == "fix":
+                if options.fix:
+                    extraval = "fix"
+            # Use after merge
+            elif logoption.lower() == "reset":
+                if options.reset:
+                    extraval = "reset"
+            elif logoption.lower() == "list":
+                if options.list:
+                    extraval = "list"
+            elif len(logoption) > 0:
+                print "Unsupported value %s for %s" % (logoption,
+                                                  EXTRA_LOGPARAM)
+                return None
+            if extraval != None:
+                prefix = "%s_%s" % (prefix, extraval)
+        # Replace any / or space with _
+        prefix = prefix.replace("/", "_")
+        prefix = prefix.replace(" ", "_")
+        if len(prefix) + len(starttime) > 250:
+            # Truncate log file as too long
+            prefix = prefix[0:248 - len(starttime)] + ".."
+        prefix = "%s/%s_%s" % (constants.LOG_DIR, prefix, starttime)
+        return prefix
+
+    def _add_debug_handler(self, workfile, hostfile, starttime, o, old_prefix):
+        """ Add debug handler"""
+        prefix = self._calculate_log_prefix(workfile, hostfile, starttime, o)
+        debuglog = logging.getLogger('wfeng')
+        if prefix == None:
+            # Failed to calculate prefix
+            return False
+        if old_prefix == prefix:
+            # Prefix hasn't changed so don't need to do anything
+            return True
+        elif old_prefix != None:
+            log.debug("Changing log filename to %s after menu selections" % \
+                   prefix)
+            # remove all old handlers
+            for hdlr in list(debuglog.handlers):
+                if isinstance(hdlr, logging.FileHandler):
+                    hdlr.close()
+                    debuglog.removeHandler(hdlr)
+        # Add debug handler
+        self.logfilename = "%s.log" % prefix
+        debug = logging.FileHandler(self.logfilename)
+        debug.setLevel(logging.DEBUG)
+        formatter = WfengFormatter('%(asctime)s %(message)s')
+        debug.setFormatter(formatter)
+        debuglog.addHandler(debug)
+        return True
+
+    def _add_trace_handler(self, workfile, hostfile, starttime, o, old_prefix):
+        """ Add trace handler"""
+        prefix = self._calculate_log_prefix(workfile, hostfile, starttime, o)
+        rootlog = logging.getLogger()
+        if prefix == None:
+            # Failed to calculate prefix
+            return False
+        if old_prefix == prefix:
+            # Prefix hasn't changed so don't need to do anything
+            return True
+        elif old_prefix != None:
+            log.debug("Changing trc filename to %s after menu selections" % \
+                   prefix)
+            # remove all old handlers
+            for hdlr in list(rootlog.handlers):
+                if isinstance(hdlr, logging.FileHandler):
+                    hdlr.close()
+                    rootlog.removeHandler(hdlr)
+        # Add trace handler
+        self.tracefilename = "%s.trc" % prefix
+        root = logging.FileHandler(self.tracefilename)
+        root.setLevel(constants.TRACE)
+        formatter = WfengFormatter('%(asctime)s %(message)s')
+        root.setFormatter(formatter)
+        rootlog.addHandler(root)
+        return True
 
     def start(self):
         # Read in command line options
@@ -165,10 +269,17 @@ class WorkflowEngine:
             else:
                 print "Exiting as instance of wfeng already running"
             return False
-        self.logfilename = "%s/%s_%s_%s.log" %\
-                         (constants.LOG_DIR, workfile, hostfile, starttime)
-        self.tracefilename = "%s/%s_%s_%s.trc" %\
-                         (constants.LOG_DIR, workfile, hostfile, starttime)
+
+        self.config = WfmgrConfig()
+        if not self.config.load():
+            print "Failed to load wfeng.cfg"
+            return False
+
+        prefix = self._calculate_log_prefix(workfile, hostfile, starttime, o)
+        if prefix == None:
+            # Failed to calculate prefix
+            return False
+        self.tracefilename = "%s.trc" % prefix
         logging.addLevelName(constants.TRACE, "TRACE")
         logging.addLevelName(constants.DEBUGNOTIME, "DEBUGNOTIME")
         logging.basicConfig(filename=self.tracefilename,
@@ -178,18 +289,20 @@ class WorkflowEngine:
         console.setLevel(logging.INFO)
         logging.getLogger('wfeng').addHandler(console)
 
-        # Add debug handler
-        debug = logging.FileHandler(self.logfilename)
-        debug.setLevel(logging.DEBUG)
-        formatter = WfengFormatter('%(asctime)s %(message)s')
-        debug.setFormatter(formatter)
-        logging.getLogger('wfeng').addHandler(debug)
+        if not self._add_debug_handler(workfile, hostfile, starttime, o, None):
+            return False
 
         # Create queue for subprocesses
         self.logqueue = multiprocessing.Queue()
 
-        self.config = WfmgrConfig()
-        self.config.load()
+        if not o.version_checker.load_swplugin(
+                     self.config.cfg.get(SWVERSIONPLUGIN, None)):
+            log.error("Failed to load software version plugin")
+            return False
+        if not o.version_checker.load_osplugin(
+                     self.config.cfg.get(OSVERSIONPLUGIN, None)):
+            log.error("Failed to load OS version plugin")
+            return False
         if not os.path.isfile(o.wfile):
             log.error("Workflow file %s does not exist" % o.wfile)
             return False
@@ -208,7 +321,15 @@ class WorkflowEngine:
         hosts = Hosts()
         if not hosts.parse(o.hfile):
             return False
-
+        if o.needMenu():
+            o.getMenuOptions(self.term_size, self.config)
+            # Change filenames as used menu
+            if not self._add_debug_handler(workfile, hostfile, starttime,
+                                           o, prefix):
+                return False
+            if not self._add_trace_handler(workfile, hostfile, starttime,
+                                           o, prefix):
+                return False
         # if we are adding/removing dynamic pause/esc then
         # process interactively and exit
         if o.alter_pause_escape:
@@ -222,8 +343,6 @@ class WorkflowEngine:
                 log.info("\nUnexpected interrupt (CTRL/C) received - " \
                          "please check status file is as expected\n")
                 return False
-        if o.needMenu():
-            o.getMenuOptions(self.term_size, self.config)
         os.system('clear')
         log.info("WORKFLOW ENGINE".center(self.term_size))
         log.info("----------------".center(self.term_size))
@@ -236,7 +355,7 @@ class WorkflowEngine:
         log.info("    server types: %s" % o.unparsed_servertypes)
         log.info("    server name: %s" % o.unparsed_servernames)
         log.info("    excluded servers: %s" % o.exclude)
-        log.info("    task id: %s" % o.task)
+        log.info("    task id: %s" % o.unparsed_task)
         log.info("    tag id: %s" % o.tag)
         log.info("    output level: %d" % o.output_level)
         if o.force:
@@ -254,6 +373,8 @@ class WorkflowEngine:
                 o.phase = "postcheck"
         if o.fix:
             log.info("    fix: True")
+        if o.reset:
+            log.info("    reset: True")
 
         # check here that any server in the exclusion list is found in the
         # hosts file
@@ -299,26 +420,6 @@ class WorkflowEngine:
             log.debug("Exception: %s" % (traceback.format_exc()))
             return False
 
-        # validate task is valid
-        if o.task != None:
-            if not wfsys.taskInWorkflow(o.task):
-                log.error("Task id %s selected is not in workflow file" % \
-                                           o.task)
-                return False
-        # validate tag is valid
-        if o.tag != None:
-            if not wfsys.tagInWorkflow(o.tag):
-                log.error("Tag %s selected is not in workflow file" % \
-                                           o.tag)
-                return False
-        # Validate fix task is FabricTask
-        if o.fix:
-            taskobj = wfsys.getTask(o.task)
-            if not isinstance(taskobj, FabricTask):
-                log.error("Fix is not supported on task %s" % \
-                                   o.task)
-                return False
-
         # Global status is in same directory as workfile, but appended with
         # hostname file and status.xml
         prefix = o.wfile.split('.xml')
@@ -328,8 +429,11 @@ class WorkflowEngine:
         # flag for whether we are simply merging wflow and hosts and exiting
         # at start of a --list run
         listExitEarly = False
+        writeNewSysfile = False
+        notfoundmsg = "workflow file"
         # Check if already got work file system
         if os.path.isfile(sysfilename):
+            notfoundmsg = notfoundmsg = "master status file %s" % sysfilename
             log.info("    previous run: %s" % sysfilename)
             loadsys = WorkflowSystem("", self.config)
             loadsys.load(sysfilename, hosts)
@@ -341,19 +445,70 @@ class WorkflowEngine:
                           "previous run, please investigate")
                 return False
         else:
-            # if --list and there is no pre-existing workflow file then we
+            # if --reset and there is no pre-existing status file then
+            # this must be an error as we have no tasks for reset
+            if o.reset:
+                log.error("There is no pre-existing status file %s" % \
+                                                              sysfilename)
+                sys.exit(1)
+            # if --list and there is no pre-existing status file then we
             # generate a listing file and exit straight away
-            if o.list:
-                log.info("There is no pre-existing status file")
+            elif o.list:
+                log.info("There is no pre-existing status file %s" % \
+                                                            sysfilename)
                 listExitEarly = True
             else:
                 log.info("    previous run: N/A")
-                wfsys.write(sysfilename)
+                writeNewSysfile = True
+
+        # validate task is valid and parse comma separated list into list
+        if o.unparsed_task != None:
+            o.task = utils.split_commas(o.unparsed_task)
+            log.debug("Task list unparsed is %s" % o.unparsed_task)
+            log.debug("Task list is %s" % o.task)
+            for t in o.task:
+                if not wfsys.taskInWorkflow(t):
+                    log.error("Task id %s selected is not in %s" % \
+                                    (t, notfoundmsg))
+                    return False
+                # for reset the task must be in execute phase
+                if o.reset:
+                    if wfsys.execute.getTask(t) == None:
+                        log.error("Reset task id %s is not in " \
+                                                 "execute phase" % t)
+                        return False
+                    elif wfsys.execute.getTask(t).isParallel():
+                        log.error("Reset task id %s is not " \
+                                  "supported (parallel)" % t)
+                        return False
+
+        # validate tag is valid
+        if o.tag != None:
+            if not wfsys.tagInWorkflow(o.tag):
+                log.error("Tag %s selected is not in workflow file" % \
+                                           o.tag)
+                return False
+        # Validate fix task is FabricTask
+        if o.fix:
+            for t in o.task:
+                taskobj = wfsys.getTask(t)
+                if not isinstance(taskobj, FabricTask) and \
+                                     not isinstance(taskobj, MsgTask):
+                    log.error("Fix is not supported on task %s" % \
+                                   t)
+                    return False
+
+        if writeNewSysfile:
+            # write new status file if neccessary now that we know there are
+            # no validation issues on task or tag
+            wfsys.write(sysfilename)
+
         # if --list then ascertain whether all eligible tasks are in a
         # complete state
-        if o.list and wfsys.eligibleDisplayTasks(o.servertypes, o.servernames,
+        if o.list and not o.reset and \
+                      wfsys.eligibleDisplayTasks(o.servertypes, o.servernames,
                          o.exclude,
-                         o.force, o.exact_match):
+                         o.force, o.version_checker):
             log.info("Display phase has not been completed and therefore "
                       "later phases cannot be predicted")
             listExitEarly = True
@@ -365,18 +520,67 @@ class WorkflowEngine:
             wfsys.write("%s%s" % (sysfilename, constants.LISTFILE_SUFFIX))
             sys.exit(0)
 
+        if o.reset:
+            log.info("\nProcessing reset...\n")
+            # make sure we have a backup status file
+            try:
+                bkpwfsys = wf.genWorkflowSystem(hosts)
+                log.debug("generating status backup")
+                if os.path.isfile(sysfilename):
+                    bkploadsys = WorkflowSystem("", self.config)
+                    bkploadsys.load(sysfilename, hosts)
+                    log.debug("taking stattus backup from %s" % sysfilename)
+                    bkpwfsys = bkploadsys
+            except Exception as err:
+                log.error("Failed to generate backup: %s" % str(err))
+                log.debug("Exception: %s" % (traceback.format_exc()))
+                return False
+            try:
+                resetOk = wfsys.processManualReset(o)
+                if resetOk == constants.R_OK:
+                    log.info("\nManual reset completed successfully")
+                elif resetOk == constants.R_DEPENDENCY_CONFLICT:
+                    log.info("\nManual reset cancelled due to " \
+                             "conflicting dependencies")
+                    return False
+                else:
+                    log.info("\nManual reset not actioned due to errors " \
+                             "encountered")
+                    return False
+
+                # all ok - so backup and save altered status file
+                errmsgs = []
+                if not self.writeUpdate(wf, wfsys, sysfilename, hosts,
+                             constants.MANUAL_RESET_BKPDIR, errmsgs, bkpwfsys):
+                    errs = ""
+                    if len(errmsgs) != 0:
+                        errs = "Error: ".join(errmsgs)
+                    log.error("Manual reset statusfile update failed %s" % \
+                                                                          errs)
+                    return False
+                return True
+            except KeyboardInterrupt:
+                log.info("\nUnexpected interrupt (CTRL/C) received " \
+                         "during manual reset - " \
+                         "please check status file is as expected\n")
+                return False
         wfsys.logqueue = self.logqueue
+        # Add an interrupt handler for main process to handle Ctrl-C
+        # Any children will inherit this signal handler
+        signal.signal(signal.SIGINT, wfsys.interrupt_handler)
         runner = CmdLineWorkflowRunner(wfsys, self.term_size, o)
         if o.list:
             log.info("\nListing has been run from the pre-existing master "\
                      "status file onwards, with predictive output written "
                      "to file %s%s" % (sysfilename,
                                        constants.LISTFILE_SUFFIX))
-        return runner.run()
+        ret = runner.run()
+        return ret
 
     def dynamicAlterations(self, o, hosts, ini):
         """ does the processing for a dynamic alterations run
-            Arguments:
+
+            Args:
                 o: the WorkflowOptions object
                 hosts: hosts object
                 ini: the ini file params object
@@ -392,6 +596,7 @@ class WorkflowEngine:
             return False
         try:
             wfsys = wf.genWorkflowSystem(hosts)
+            bkpwfsys = wf.genWorkflowSystem(hosts)
         except Exception as err:
             log.error("Failed to generate workflow : %s" % str(err))
             log.debug("Exception: %s" % (traceback.format_exc()))
@@ -411,6 +616,10 @@ class WorkflowEngine:
                     log.debug("Previous run is equivalent to current "
                                   "files - operating on status file")
                     wfsys = loadsys
+                    bkploadsys = WorkflowSystem("", self.config)
+                    bkploadsys.load(sysfilename, hosts)
+                    log.debug("taking status backup from %s" % sysfilename)
+                    bkpwfsys = bkploadsys
                 else:
                     log.error("Workflow and/or hosts file has "
                         "changed since previous run, please investigate")
@@ -429,7 +638,7 @@ class WorkflowEngine:
                 log.debug("Dynamic task input: %s" % dyntask)
                 menuMsgs = []
                 if not self.processDynamicAlteration(dyntask, wf, wfsys,
-                               sysfilename, hosts, menuMsgs):
+                               bkpwfsys, sysfilename, hosts, menuMsgs):
                     if len(menuMsgs) == 0:
                         menuMsgs.append("Unspecified error during " \
                                       "processing %s, dynamic alteration " \
@@ -438,13 +647,15 @@ class WorkflowEngine:
                 log.debug("Finished processDynamicAlteration with "
                               "menuMsg %s" % menuMsgs)
 
-    def processDynamicAlteration(self, dyntask, wf, wfsys,
+    def processDynamicAlteration(self, dyntask, wf, wfsys, bkpwfsys,
                                   sysfilename, hosts, menuMsgs):
         """ processes a dynamic alteration (add/remove) for pause/esc
-            Arguments:
+
+            Args:
                 dyntask: a dictionary containing the details for the alteration
-                wf: the original workflow (for validation in dynamicUpdate)
+                wf: the original workflow (for validation in writeUpdate)
                 wfsys: the workflowsys
+                bkpwfsys: the original workflowsys for backup
                 sysfilename: the name of the master status file
                 hosts: host object containing details of the hosts in this run
                 menuMsgs: list to hold messages for display during interaction
@@ -472,7 +683,7 @@ class WorkflowEngine:
                               % dyntaskid)
                 return False
             if not self.dynamicAlterationAdd(dyntask, wf, wfsys,
-                              sysfilename, hosts, menuMsgs):
+                              bkpwfsys, sysfilename, hosts, menuMsgs):
                 menuMsgs.append("Unable to add dynamic task %s" % \
                                dyntask[constants.DYN_ID])
                 return False
@@ -483,7 +694,7 @@ class WorkflowEngine:
                         "execute phase" % (dyntype, dyntaskid))
                 return False
             if not self.dynamicAlterationRemove(dyntask, wf, wfsys,
-                                       sysfilename, hosts, menuMsgs):
+                                       bkpwfsys, sysfilename, hosts, menuMsgs):
                 menuMsgs.append("Unable to remove dynamic task %s" % \
                                                 dyntask[constants.DYN_ID])
                 return False
@@ -494,17 +705,19 @@ class WorkflowEngine:
 
         return True
 
-    def dynamicAlterationAdd(self, dyntask, wf, wfsys, sysfilename,
+    def dynamicAlterationAdd(self, dyntask, wf, wfsys, bkpwfsys, sysfilename,
                                                      hosts, menuMsgs):
         """performs dynamic addition for pause/esc
-           Arguments:
+
+           Args:
                 dyntask: a dictionary containing the details for the alteration
-                wf: the original workflow (for validation in dynamicUpdate)
+                wf: the original workflow (for validation in writeUpdate)
                 wfsys: the workflowsys
+                bkpwfsys: the original workflowsys for backup
                 sysfilename: the name of the master status file
                 hosts: host object containing details of the hosts in this run
                 menuMsgs: list to hold messages for display during interaction
-            Returns:
+           Returns:
                 boolean: True if alteration successful,
                          False if alteration failed
         """
@@ -588,8 +801,9 @@ class WorkflowEngine:
                                  "into group %s execute phase" % \
                         (taskforinsert.name, groupid))
                 return False
-
-        if not self.dynamicUpdate(wf, wfsys, sysfilename, hosts, menuMsgs):
+        if not self.writeUpdate(wf, wfsys, sysfilename, hosts,
+                             constants.DYNAMIC_ALTERATIONS_BKPDIR,
+                               menuMsgs, bkpwfsys):
             menuMsgs.append("Dynamic addition update for task %s "
                              "failed - please check logs" % \
                         taskforinsert.name)
@@ -598,17 +812,19 @@ class WorkflowEngine:
                         "dynamic entry %s added" % (sysfilename, dyntaskid))
         return True
 
-    def dynamicAlterationRemove(self, dyntask, wf, wfsys, sysfilename, hosts,
-                                      menuMsgs):
+    def dynamicAlterationRemove(self, dyntask, wf, wfsys, bkpwfsys,
+                                      sysfilename, hosts, menuMsgs):
         """performs dynamic addition for pause/esc
-           Arguments:
+
+           Args:
                 dyntask: a dictionary containing the details for the alteration
-                wf: the original workflow (for validation in dynamicUpdate)
+                wf: the original workflow (for validation in writeUpdate)
                 wfsys: the workflowsys
+                bkpwfsys: the original workflowsys for backup
                 sysfilename: the name of the master status file
                 hosts: host object containing details of the hosts in this run
                 menuMsgs: list to hold messages for display during interaction
-            Returns:
+           Returns:
                 boolean: True if alteration successful,
                          False if alteration failed
         """
@@ -626,7 +842,9 @@ class WorkflowEngine:
                             "from execute phase, please check logs" % \
                         dyntaskid)
             return False
-        if not self.dynamicUpdate(wf, wfsys, sysfilename, hosts, menuMsgs):
+        if not self.writeUpdate(wf, wfsys, sysfilename, hosts,
+                        constants.DYNAMIC_ALTERATIONS_BKPDIR,
+                                  menuMsgs, bkpwfsys):
             menuMsgs.append("Dynamic removal update for task %s failed "
                             "- please check logs" % \
                         dyntaskid)
@@ -635,21 +853,24 @@ class WorkflowEngine:
                         "entry %s removed" % (sysfilename, dyntaskid))
         return True
 
-    def dynamicUpdate(self, wf, wfsys, sysfilename, hosts, menuMsgs):
+    def writeUpdate(self, wf, wfsys, sysfilename, hosts, backupdir, errmsgs,
+                                     bkpwfsys=None):
         """ updates the master status file
-            - firstly as a tmp file, then reads in and validates the tmp
-             file and if ok renames to master status file
-            Arguments:
+            firstly as a tmp file, then reads in and validates the tmp
+            file and if ok renames to master status file
+
+            Args:
                 wf: the original workflow (for validation)
                 wfsys: the workflowsys
                 sysfilename: name of the master status file
                 hosts: the hosts object
-                menuMsgs: list to hold messages for display during interaction
+                backupdir: the dir in which backup is to reside
+                errmsgs: list to hold messages from this method
+                bkpwfsys: the backup wfsys generated at start
             Returns:
                 True if master valid master status file was produced,
                 False if errors were encountered
         """
-
         # now update the workflow file as tmp file
         tmpsysfile = "%s_tmp" % sysfilename
         wfsys.write(tmpsysfile)
@@ -657,7 +878,7 @@ class WorkflowEngine:
         # now attempt to reload the tmp file - which will validate against xsd
         loadtmp = WorkflowSystem("", self.config)
         if not loadtmp.load(tmpsysfile, hosts):
-            menuMsgs.append("Failed to reload new master status file. " \
+            errmsgs.append("Failed to reload new master status file. " \
                        "Investigate the problem, then remove invalid " \
                        "temporary status file %s," \
                        " and rerun the dynamic alteration" % tmpsysfile)
@@ -665,19 +886,15 @@ class WorkflowEngine:
         # now perform equivalency test against original workflow
         wfcheck = wf.genWorkflowSystem(hosts)
         if not wfcheck.isEquivalent(loadtmp):
-            menuMsgs.append("New master status file does not match original" \
+            errmsgs.append("New master status file does not match original" \
                             " workflow. " \
                        "Investigate the problem, then remove invalid " \
                        "temporary status file %s," \
                        " and rerun the dynamic alteration" % tmpsysfile)
             return False
 
-        # if validated ok then rename the tmp file as the new master status
-        # file
-
         # write backup file before updating the status file
         tstamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        backupdir = "dynamic_alteration_backups"
         if '/' in sysfilename:
             sysfilesplit = sysfilename.rsplit('/', 1)
             basedir = sysfilesplit[0]
@@ -692,16 +909,21 @@ class WorkflowEngine:
         if not os.path.exists(backupdir):
             log.debug("creating backup directory %s" % backupdir)
             os.mkdir(backupdir)
-
-        wfsys.write(timestampedBackup)
-        log.debug("Timestamped backup %s created" % timestampedBackup)
-
+        if bkpwfsys is not None:
+            bkpwfsys.write(timestampedBackup)
+            log.debug("Timestamped backup %s created" % timestampedBackup)
+        else:
+            log.error("Unable to create backup, no backup wfsys")
+            return False
         log.debug("Renaming temp status file %s as master status file %s" % \
                    (tmpsysfile, sysfilename))
+
+        # if validated ok and backup created then rename the tmp file
+        # as the new master statusfile
         try:
             os.rename(tmpsysfile, sysfilename)
         except:
-            menuMsgs.append("Error renaming temporary file %s to master "
+            errmsgs.append("Error renaming temporary file %s to master "
                             "status file %s" % (tmpsysfile, sysfilename))
             return False
 
@@ -730,13 +952,15 @@ class CmdLineWorkflowRunner:
                                              constants.LISTFILE_SUFFIX))
                 else:
                     self.wfsys.write(sysfilename)
-
                 if status.status == WorkflowStatus.USER_INPUT:
                     log.debug("Asking: %s" % status.user_msg)
                     if not self.wfsys.input.askContinue(status):
                         log.debug("Response indicates to stop")
                         finished = True
-                        log.info("Stopping workflow as requested")
+                        if self.wfsys.trapped:
+                            log.info("STOPPING due to interrupt")
+                        else:
+                            log.info("Stopping workflow as requested")
                     else:
                         log.debug("Response indicates to continue")
                 elif status.status == WorkflowStatus.COMPLETE:
@@ -789,15 +1013,15 @@ class WorkflowOptions:
         parser.add_argument("-e", "--exclude",
                     help="Comma separated names of server not to run on")
         parser.add_argument("-t", "--task",
-                            help="ID of task to run")
+                            help="Comma separated list of IDs of tasks to run")
         parser.add_argument("-f", "--force", action='store_true',
-                    help=argparse.SUPPRESS)
-        parser.add_argument("-c", "--compare_versions", action='store_true',
                     help=argparse.SUPPRESS)
         parser.add_argument("-l", "--list", action='store_true', default=False,
                     help=argparse.SUPPRESS)
         parser.add_argument("-F", "--fix", action='store_true', default=False,
-                    help="Mark individual task as fixed")
+                    help="Mark matching tasks as fixed")
+        parser.add_argument("-R", "--reset", action='store_true',
+                    default=False, help="Mark matching tasks as reset")
         parser.add_argument("-v", "--version", action='store_true',
                     default=False,
                     help="Display version information")
@@ -819,8 +1043,8 @@ class WorkflowOptions:
                                  "including pauses")
         parser.add_argument("-d", "--alter_pause_escape", action='store_true',
                             default=False,
-                            help="Invoke interactive add/delete of dynamic "
-                                  "pause and dynamic escape into master "
+                            help="Invoke interactive add/delete of dynamic " \
+                                  "pause and dynamic escape into master " \
                                   "status file")
         # When running in parallel mode then connections will be made to
         # each parallel server at same time.
@@ -834,6 +1058,8 @@ class WorkflowOptions:
         self.version = args.version
         if args.version:
             return
+        if args.task == "":
+            parser.error("Task must not be an empty string")
 
         if args.alter_pause_escape:
             # verify that only other args are workflow, hosts, custom ini file
@@ -846,9 +1072,9 @@ class WorkflowOptions:
                     args.exclude != None or \
                     args.task != None or \
                     args.force != False or \
-                    args.compare_versions != False or \
                     args.list != False or \
                     args.fix != False or \
+                    args.reset != False or \
                     args.version != False or \
                     args.nospinner != False or \
                     args.allow_multiple != False or \
@@ -856,10 +1082,58 @@ class WorkflowOptions:
                     args.yes != False or \
                     args.automate != False:
                 parser.error("For alter_pause_escape option the only " \
-                             "additional (non-default) parameters must be \
-                                --workfile (-w) and --hostfile (-H)")
-                return
+                             "additional (non-default) parameters must be "\
+                                "--workfile (-w) and --hostfile (-H)")
 
+        if args.fix:
+            # verify that inappropriate params are not supplied
+            if args.reset:
+                parser.error("param reset not permitted for fix")
+            if args.tag != None:
+                parser.error("param tag not permitted for fix")
+            if args.parallel_delay != 1:
+                parser.error("parallel-delay not permitted for fix")
+            if args.list:
+                parser.error(
+                    "The --list parameter cannot be used with manual fix")
+
+        if args.reset:
+            # verify that inappropriate params are not supplied
+            if args.phase != None or \
+                    args.timeout != 10 or \
+                    args.version != False or \
+                    args.nospinner != False or \
+                    args.output != None or \
+                    args.yes != False or \
+                    args.automate != False or \
+                    args.alter_pause_escape != False or \
+                    args.parallel_delay != 1:
+                parser.error("For manual reset option the only compatible "\
+                             "parameters are : workflow, hostfile, " \
+                             "servertype, servername, tag, exclude, task, " \
+                              "force, allow-multiple")
+
+            if args.list:
+                parser.error(
+                    "The --list parameter cannot be used with manual reset")
+
+            if args.task == None and args.tag == None:
+                parser.error(
+                    "For manual reset one of task or tag must be supplied")
+            if args.tag == "":
+                parser.error(
+                    "For manual reset the tag parameter cannot be " \
+                         "empty string")
+
+            if args.exclude != None and args.servername != constants.ALL:
+                parser.error("For reset option the exclude parameter cannot " \
+                             "be used with servername")
+            if args.servername == constants.LOCAL:
+                parser.error("For manual fix or reset option the servername " \
+                             "parameter cannot be constants.LOCAL")
+            if args.servertype == constants.LOCAL:
+                parser.error("For manual fix or reset option the servertype " \
+                             "parameter cannot be constants.LOCAL")
         # Only specify one of servername or servertype
         if args.servername != constants.ALL and \
            args.servertype != constants.ALL:
@@ -878,8 +1152,8 @@ class WorkflowOptions:
             parser.error("At most one of list and fix may be supplied")
         if args.fix and args.task == None:
             parser.error("Task must be specified to use fix")
-        if args.fix and args.servername == constants.ALL:
-            parser.error("Servername must be specified to use fix")
+        #if args.fix and args.servername == constants.ALL:
+        #    parser.error("Servername must be specified to use fix")
         if args.output == None:
             self.output_level = 0
         else:
@@ -887,8 +1161,6 @@ class WorkflowOptions:
                 self.output_level = int(args.output)
             except:
                 parser.error("Output level must be numeric")
-        if args.task != None and args.phase != None:
-            parser.error("At most of one of phase and task may be supplied")
         self.wfile = args.workfile
         self.inifile = args.inifile
         self.hfile = args.hostfile
@@ -897,25 +1169,30 @@ class WorkflowOptions:
         self.unparsed_servertypes = args.servertype
         self.unparsed_servernames = args.servername
         self.exclude = args.exclude
-        self.task = args.task
+        self.unparsed_task = args.task
+        self.task = None
         self.force = args.force
         self.list = args.list
         self.fix = args.fix
+        self.reset = args.reset
         self.nospinner = args.nospinner
         self.allow_multiple = args.allow_multiple
         self.alter_pause_escape = args.alter_pause_escape
         self.yes = args.yes
         self.automate = args.automate
-        self.exact_match = True
         self.parallel_delay = args.parallel_delay
-        if args.compare_versions:
-            self.exact_match = False
+        self.version_checker = PluginMgr()
         self.tag = args.tag
-        if self.task != None:
-            self.phase = constants.OPT_POSTCHECK
+        if self.unparsed_task != None:
+            if self.reset:
+                self.phase = constants.OPT_EXECUTE
+            else:
+                self.phase = constants.OPT_POSTCHECK
 
     def needMenu(self):
-        if self.phase == None and self.task == None and self.list != True:
+        if self.phase == None and self.unparsed_task == None and \
+           self.reset != True and self.list != True and \
+           self.alter_pause_escape != True:
             return True
         else:
             return False
