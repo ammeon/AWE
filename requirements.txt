@@ -1,0 +1,6 @@
+fabric < 2.0.0
+paramiko
+lxml
+argparse
+pycrypto
+ecdsa

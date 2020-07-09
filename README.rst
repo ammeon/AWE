@@ -6,32 +6,55 @@ performing upgrades or other maintenance tasks) across multiple servers.
 
 The tasks to be performed on a deployment are broken down into steps and the dependencies between those steps are controlled using a template workflow file. The AWE runs the workflow file against a hosts file, which identifies the hosts used in a particular deployment. It then runs the steps required (on remote servers or locally) to perform the required tasks. Both Linux and Solaris distributions are supported.
 
-For further information on AWE, please see the AWE Overview at http://www.ammeon.com/service/service-upgrade-orchestration-with-ammeon-workflow-engine/ or contact awe-support@ammeon.com.
+For further information on AWE, please see the AWE Overview at https://www.ammeonsolutions.com/workflow-engine or contact consulting@ammeonsolutions.com.
 
+Supported Platforms
+============
 
+Some of the distributions AWE has been verified on are listed below:
+
+1. CentOS 8 (with python 2.7)
+2. CentOS 7
+3. Ubuntu 16.04.6 LTS (Xenial Xerus)
+4. Solaris 11
+5. Solaris 10
+6. Scientific Linux 6.4
 
 Dependencies
 ============
-AWE has been tested on Python 2.6, and requires the following libraries. In brackets are the versions that it has been verified against (however it may be compatible with other versions):
+AWE has been tested on Python 2.6 and Python 2.7, and requires the following libraries. In brackets are some of the versions that AWE has been verified against:
 
-1. Fabric (1.10.1)
-2. paramiko (1.12.4)
+1. Fabric (1.10.1, 1.14.1)
+2. paramiko (1.12.4, 2.7.1)
 3. pycrypto (2.6.1)
-4. lxml (2.2.8)
-5. ecdsa (0.11)
-6. ctypes (1.1.0)
-7. argparse (1.3.0)
-8. setuptools (3.4.4)
+4. lxml (2.2.8, 4.5.1)
+5. ecdsa (0.11, 0.15)
+6. ctypes (1.1.0). NB. This is bundled with some releases
+7. argparse (1.3.0, 1.4.0)
+8. setuptools (3.4.4, 0.9.8)
+
+
+A pip requirements file is included which can be used on deployments where ctypes is bundled with python.
+
+The above dependencies must be installed before running the installation script.
 
 Install AWE
 ===========
-1. AWE runs on both Solaris and Linux, and the install.sh script provided will work on both.
+1. AWE runs on both Solaris and Linux with python 2.6 and python 2.7, and the install.sh script provided will work on both.
 2. AWE works from a AWE_HOME directory, so prior to beginning the installation set AWE_HOME environment variable to point to the location that you wish AWE to be installed to.  AWE will create a cfg, xsd, log, license, etc directories for input files and logs.  The wfeng package that comprises AWE, will be deployed to the lib/wfeng directory under AWE.  If a different directory structure is required then python setup.py install can be used instead.
 3. Default installation steps:
 
-  a) set AWE_HOME to directory which to install AWE to
-  b) set AWE_USER to the user that should own the AWE directories.
-  c) Run 'install.sh' to install the AWE software. install.sh will install the AWE software, and set a wfeng alias in the user's profile
+   a. install python 2 (if not installed)
+   b. ensure that GCC is installed, e.g. yum install gcc / apt install gcc
+   c. ensure that python.h is installed, e.g. install python-devel/python2-devel on EL distributions, python-dev on Ubuntu, etc.
+   d. install pip
+   e. install python pre-requisites listed above using pip, e.g. pip install -r requirements.txt
+   f. verify that ctypes is already installed, by testing "import ctypes" from the python command line
+   g. set AWE_HOME to directory which to install AWE to
+   h. set AWE_USER to the user that should own the AWE directories.
+   i. Run 'install.sh' to install the AWE software. install.sh will install the AWE software, and set a wfeng alias in the user's profile.
+
+      NB. If installed on CentOS8 then the python binary will be called python2.7, so the reference to python in install.sh will need to be replaced with python2.7
 
 4. Set an alias wfeng to point to <AWE_HOME>/lib/workfloweng.py if the install hasn't set one up for you
 5. Test the install with: wfeng -h
