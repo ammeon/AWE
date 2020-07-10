@@ -1,7 +1,7 @@
 Overview
 ========
 
-The Ammeon Workflow Engine (AWE) uses a workflow, a file containing a series of tasks that are grouped into categories (or phases), to define and execute the steps needed to perform operations on the servers in a deployment. AWE is designed to simplify the complex steps involved in managing a solution (for example,
+The Ammeon Solutions Workflow Engine (AWE) uses a workflow, a file containing a series of tasks that are grouped into categories (or phases), to define and execute the steps needed to perform operations on the servers in a deployment. AWE is designed to simplify the complex steps involved in managing a solution (for example,
 performing upgrades or other maintenance tasks) across multiple servers.
 
 The tasks to be performed on a deployment are broken down into steps and the dependencies between those steps are controlled using a template workflow file. The AWE runs the workflow file against a hosts file, which identifies the hosts used in a particular deployment. It then runs the steps required (on remote servers or locally) to perform the required tasks. Both Linux and Solaris distributions are supported.
